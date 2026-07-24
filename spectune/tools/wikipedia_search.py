@@ -21,8 +21,10 @@ _TAG_RE = re.compile(r"<[^>]+>")
 class WikipediaSearchTool(Tool):
     name = "wikipedia_search"
     description = (
-        "Search Wikipedia by free-text query and return matching page titles with "
-        "snippets, optionally including a short summary per top hit."
+        "Search Wikipedia (free text) for encyclopedic reference on compounds, reactions, "
+        "or concepts, returning page titles, snippets, and optional per-hit summaries. "
+        "Backed by the live Wikipedia API (may be slow); a generally reliable reference, "
+        "though content can be outdated."
     )
 
     def __init__(self, config: WikipediaSearchConfig | None = None) -> None:

@@ -40,9 +40,10 @@ _FUNCTIONAL_GROUP_SMARTS: dict[str, str] = {
 class ReactionLocalIndexSearchTool(Tool):
     name = "reaction_local_index_search"
     description = (
-        "Search local reaction precedent tables (USPTO / ChemPile-lift / Pistachio) for "
-        "products of reactions sharing reactants with the query, via canonical "
-        "reactant-set overlap scoring. Does not read NMR/MS spectra."
+        "Search local reaction-precedent tables (USPTO / ChemPile-lift / Pistachio) for products "
+        "of reactions sharing reactants with the query, via canonical reactant-set overlap scoring. "
+        "Scanning large tables can be slow; candidates are references to verify, not answers. Does not "
+        "read NMR/MS spectra."
     )
 
     def __init__(self, config: ReactionLocalIndexSearchConfig | None = None) -> None:

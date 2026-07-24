@@ -14,7 +14,11 @@ from .utils import canonical_smiles, molecular_formula, post_json
 
 class NmrRepairTool(Tool):
     name = "nmr_repair"
-    description = "Repair or refine a seed candidate molecule so it matches a target molecular formula."
+    description = (
+        "Refine a seed candidate SMILES so it matches a target molecular formula, via an "
+        "external reinforcement learning based model. Runs remotely; the repaired structure is a "
+        "suggestion worth verifying."
+    )
     parameters: JsonDict = {
         "type": "object",
         "properties": {

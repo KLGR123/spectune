@@ -15,9 +15,9 @@ from .utils import as_list, canonical_smiles, molecular_formula, post_json, spec
 class NmrExpSearchTool(Tool):
     name = "nmrexp_search"
     description = (
-        "Search an experimental NMR structure-search backend for candidate molecules "
-        "consistent with 1H/13C spectral evidence. Uses an iterative mutate/filter/pool "
-        "search algorithm, not a generative model."
+        "Search for structures consistent with 1H/13C NMR evidence via an external "
+        "experimental-NMR search backend (iterative mutate/filter/pool, not a generative model). "
+        "The database search runs remotely and can be slow; candidates are references to verify, not answers."
     )
 
     def __init__(self, config: NmrExpSearchConfig | None = None) -> None:

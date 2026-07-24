@@ -15,8 +15,9 @@ from .utils import canonical_smiles, infer_nmr_type, molecular_formula, post_jso
 class NmrGenerateTool(Tool):
     name = "nmr_generate"
     description = (
-        "Generate candidate molecular structures from NMR spectral peaks (1H/13C shifts), "
-        "optionally constrained by a target molecular formula."
+        "Generate candidate structures from NMR peaks (1H/13C shifts), optionally constrained "
+        "by a target molecular formula, via an external generative model. Runs remotely; "
+        "candidates are suggestions to verify, not final answers."
     )
 
     def __init__(self, config: NmrGenerateConfig | None = None) -> None:

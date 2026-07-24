@@ -28,9 +28,10 @@ _FORWARD_ENDPOINT = "/api/forward/controller/call-sync"
 class AskcosReactionForwardPredictTool(Tool):
     name = "askcos_reaction_forward_predict"
     description = (
-        "Predict likely reaction products from reactant SMILES via the public ASKCOS "
-        "forward-prediction API (MIT). Does not read NMR/MS spectra; spectrum matching "
-        "requires a follow-up call to an NMR tool."
+        "Predict likely reaction products from reactant SMILES via the external ASKCOS "
+        "forward-prediction model (MIT). Runs remotely (may be slow); predictions are references "
+        "worth cross-checking. Does not read NMR/MS spectra, so spectrum matching needs "
+        "a follow-up NMR tool."
     )
 
     def __init__(self, config: AskcosReactionForwardPredictConfig | None = None) -> None:

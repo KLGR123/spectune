@@ -15,8 +15,9 @@ from .utils import canonical_smiles, has_rdkit, molecular_formula, post_json, sp
 class NmrRerankTool(Tool):
     name = "nmr_rerank"
     description = (
-        "Rerank and score candidate molecules (SMILES) against NMR spectral evidence, "
-        "optionally filtered by a target molecular formula."
+        "Score and rerank candidate SMILES against NMR spectral evidence, optionally filtered "
+        "by a target molecular formula, via an external scoring model. Runs remotely (may be "
+        "slow); scores are a reliable ranking signal worth cross-checking."
     )
 
     def __init__(self, config: NmrRerankConfig | None = None) -> None:
