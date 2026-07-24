@@ -12,8 +12,6 @@ from spectune.config import NmrForwardPredictConfig
 from .base import JsonDict, Tool, ToolResult
 from .utils import canonical_smiles, experimental_shift_lists, float_list, molecular_formula
 
-_MODES = {"match", "score", "predict"}
-
 
 class NmrForwardPredictTool(Tool):
     name = "nmr_forward_predict"
@@ -25,7 +23,6 @@ class NmrForwardPredictTool(Tool):
         "type": "object",
         "properties": {
             "smiles_list": {"type": "array", "items": {"type": "string"}, "description": "Candidates to predict."},
-            "mode": {"type": "string", "enum": sorted(_MODES), "default": "match"},
             "spectrum": {"type": "object", "description": "Optional experimental spectrum for comparison."},
             "h_shifts": {"type": "array", "items": {"type": "number"}, "description": "Experimental 1H shifts."},
             "c_shifts": {"type": "array", "items": {"type": "number"}, "description": "Experimental 13C shifts."},
@@ -46,10 +43,6 @@ class NmrForwardPredictTool(Tool):
                 status="error",
                 warnings=["nmr_forward_predict requires a non-empty smiles_list"],
             )
-
-        mode = str(args.get("mode") or "match")
-        if mode not in _MODES:
-            return ToolResult(completion="failure", status="error", warnings=[f"unsupported mode: {mode}"])
 
         if not self.config.mcp_url:
             return ToolResult(
@@ -79,7 +72,7 @@ class NmrForwardPredictTool(Tool):
         return ToolResult(
             completion="success",
             status="ok" if candidates else "no_candidates",
-            data={"mode": mode, "request": request_data, "candidates": candidates},
+            data={"request": request_data, "candidates": candidates},
         )
 
     async def _call_mcp(self, data: JsonDict) -> Any:

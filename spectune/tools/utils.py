@@ -99,6 +99,28 @@ def canonical_smiles(smiles: str) -> str:
     return Chem.MolToSmiles(molecule, canonical=True, isomericSmiles=True)
 
 
+def strict_canonical_smiles(smiles: str) -> str | None:
+    """Canonicalize with RDKit, returning ``None`` when the input is not valid.
+
+    Unlike :func:`canonical_smiles` (which passes invalid text through so display
+    code always has *something* to show), this is for callers that must reject
+    bad input outright, e.g. filtering reactant SMILES before reactant-set-overlap
+    scoring. Without RDKit installed the input cannot be validated at all, so it
+    is returned unchanged (opaque pass-through, same as ``canonical_smiles``).
+    """
+    text = str(smiles or "").strip()
+    if not text:
+        return None
+    try:
+        from rdkit import Chem  # type: ignore[import-not-found]
+    except ImportError:
+        return text
+    molecule = Chem.MolFromSmiles(text)
+    if molecule is None:
+        return None
+    return Chem.MolToSmiles(molecule, canonical=True, isomericSmiles=True)
+
+
 def molecular_formula(smiles: str) -> str | None:
     """Best-effort molecular formula; ``None`` if RDKit is unavailable or parsing fails."""
     text = str(smiles or "").strip()
@@ -218,6 +240,22 @@ def infer_nmr_type(spectrum: JsonDict) -> str:
     if spectrum.get("molecular_formula"):
         parts += "F"
     return parts or "CHF"
+
+
+def spectrum_shift_arrays(arguments: dict[str, Any]) -> tuple[list[float], list[str], list[float]]:
+    """Return ``(h_shifts, h_split, c_shifts)`` aligned arrays for search-style backends.
+
+    Unlike :func:`experimental_shift_lists`, the H-shift/H-split pair here is kept in
+    input order (not sorted) since multiplicities must stay aligned with their shift.
+    """
+    h_peaks = normalize_h_peaks(arguments.get("h_nmr_peaks")) or build_h_peaks_from_shifts(
+        arguments.get("h_shifts"), arguments.get("h_split")
+    )
+    c_peaks = normalize_c_peaks(arguments.get("c_nmr_peaks")) or build_c_peaks_from_shifts(arguments.get("c_shifts"))
+    h_shifts = [float(peak["centroid"]) for peak in h_peaks]
+    h_split = [str(peak.get("category") or "m") for peak in h_peaks]
+    c_shifts = [float(peak["delta (ppm)"]) for peak in c_peaks]
+    return h_shifts, h_split, c_shifts
 
 
 def experimental_shift_lists(arguments: dict[str, Any]) -> tuple[list[float], list[float]]:
