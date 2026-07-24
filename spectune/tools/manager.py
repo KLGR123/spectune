@@ -8,13 +8,20 @@ from typing import Any
 
 from spectune.config import SpectuneConfig
 
+from .askcos_reaction_forward_predict import AskcosReactionForwardPredictTool
 from .base import JsonDict, Tool, ToolResult
 from .code_interpreter import CodeInterpreterTool
+from .crossref_search import CrossrefSearchTool
 from .nmr_forward_predict import NmrForwardPredictTool
 from .nmr_generate import NmrGenerateTool
 from .nmr_repair import NmrRepairTool
 from .nmr_rerank import NmrRerankTool
+from .nmrexp_search import NmrExpSearchTool
+from .reaction_local_index_search import ReactionLocalIndexSearchTool
+from .semantic_scholar_search import SemanticScholarSearchTool
+from .unimol3_reaction_forward_predict import Unimol3ReactionForwardPredictTool
 from .web_search import WebSearchTool
+from .wikipedia_search import WikipediaSearchTool
 
 
 class ToolManager:
@@ -36,6 +43,13 @@ class ToolManager:
                 NmrRepairTool(config.nmr_repair),
                 NmrRerankTool(config.nmr_rerank),
                 NmrForwardPredictTool(config.nmr_forward_predict),
+                NmrExpSearchTool(config.nmrexp_search),
+                ReactionLocalIndexSearchTool(config.reaction_local_index_search),
+                AskcosReactionForwardPredictTool(config.askcos_reaction_forward_predict),
+                Unimol3ReactionForwardPredictTool(config.unimol3_reaction_forward_predict),
+                SemanticScholarSearchTool(config.semantic_scholar_search),
+                CrossrefSearchTool(config.crossref_search),
+                WikipediaSearchTool(config.wikipedia_search),
             ]
         )
 

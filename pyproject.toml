@@ -15,6 +15,7 @@ dependencies = []
 dev = ["pytest>=8", "ruff>=0.9"]
 chem = ["rdkit"]
 mcp = ["fastmcp"]
+reaction = ["pandas"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

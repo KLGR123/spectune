@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib.parse
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -82,6 +83,42 @@ def run_mock_json_server(
 
     with _serve(Handler, path=path) as api_url:
         yield api_url
+
+
+@contextmanager
+def run_mock_get_json_server(
+    handle_request: Callable[[str, dict[str, list[str]]], JsonDict],
+    *,
+    status_code: Callable[[str, dict[str, list[str]]], int] | None = None,
+) -> Iterator[str]:
+    """Serve plain ``GET ?query -> JSON`` responses, routed by request path.
+
+    This is the shared wire protocol behind the literature-search tools
+    (``semantic_scholar_search``, ``crossref_search``, ``wikipedia_search``),
+    which issue plain HTTPS GET requests with query-string parameters.
+    ``handle_request`` receives the request path (without query string) and
+    the parsed query parameters, and returns the JSON body to send back.
+    """
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            parsed = urllib.parse.urlparse(self.path)
+            query = urllib.parse.parse_qs(parsed.query)
+            payload = handle_request(parsed.path, query)
+            code = status_code(parsed.path, query) if status_code else 200
+            response_body = json.dumps(payload, ensure_ascii=False).encode()
+
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response_body)))
+            self.end_headers()
+            self.wfile.write(response_body)
+
+        def log_message(self, format_: str, *args: Any) -> None:  # noqa: N802
+            pass
+
+    with _serve(Handler, path="") as base_url:
+        yield base_url
 
 
 def run_mock_sandbox_server(
