@@ -16,7 +16,12 @@ from .base import JsonDict, Tool, ToolResult
 
 class WebSearchTool(Tool):
     name = "web_search"
-    description = "Search the web for external evidence. This tool does not infer chemical structures or final answers."
+    description = (
+        "Search the open web for reference information, e.g. a molecule's names, "
+        "SMILES/SMARTS, properties, or related literature. Hits come from an external "
+        "search API (may be slow) and are a useful reference to cross-check; it does not "
+        "infer structures or final answers."
+    )
 
     def __init__(self, config: WebSearchConfig | None = None) -> None:
         self.config = config or WebSearchConfig()

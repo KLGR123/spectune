@@ -16,8 +16,9 @@ from .utils import canonical_smiles, experimental_shift_lists, float_list, molec
 class NmrForwardPredictTool(Tool):
     name = "nmr_forward_predict"
     description = (
-        "Forward-predict atom-level 1H/13C NMR shifts for candidate molecules via an MCP "
-        "prediction backend. Optionally compares against experimental shifts."
+        "Predict atom-level 1H/13C NMR shifts for candidate SMILES via an external NMR "
+        "prediction model, optionally comparing against experimental shifts. The model "
+        "runs remotely (may be slow); predictions are approximate references worth cross-checking."
     )
     parameters: JsonDict = {
         "type": "object",

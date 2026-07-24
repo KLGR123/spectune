@@ -23,7 +23,12 @@ from .utils import extract_last_json
 
 class CodeInterpreterTool(Tool):
     name = "code_interpreter"
-    description = "Execute Python code in a configured sandbox for deterministic computation and data processing."
+    description = (
+        "Run Python in a sandbox for deterministic computation and data processing, e.g. "
+        "RDKit-based structure/formula verification, or filtering, sorting, and deduplicating "
+        "candidates. Unlike the model- and search-based tools, its output is exact and "
+        "reliable, limited only by the code you supply."
+    )
     parameters: JsonDict = {
         "type": "object",
         "properties": {

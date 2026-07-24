@@ -18,8 +18,9 @@ from .base import JsonDict, Tool, ToolResult
 class CrossrefSearchTool(Tool):
     name = "crossref_search"
     description = (
-        "Search scholarly work metadata (title, DOI, venue, year) via the Crossref REST "
-        "API. No API key is required; does not fetch full text."
+        "Look up scholarly work metadata (title, DOI, venue, year) via the external "
+        "Crossref API; no full text. The remote call may be slow; a reliable metadata "
+        "reference, though coverage can be incomplete."
     )
 
     def __init__(self, config: CrossrefSearchConfig | None = None) -> None:

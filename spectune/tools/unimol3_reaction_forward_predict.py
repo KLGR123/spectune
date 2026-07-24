@@ -23,11 +23,10 @@ from .utils import as_list, molecular_formula, post_json, strict_canonical_smile
 class Unimol3ReactionForwardPredictTool(Tool):
     name = "unimol3_reaction_forward_predict"
     description = (
-        "Predict likely reaction products from reactant SMILES via a Uni-Mol3 "
-        "forward-prediction model served at a configurable HTTP endpoint (not run "
-        "locally in-process). Currently a placeholder until that service is deployed: "
-        "with no api_url configured it reports status='unavailable'. Does not read "
-        "NMR/MS spectra; spectrum matching requires a follow-up call to an NMR tool."
+        "Predict likely reaction products from reactant SMILES via an external Uni-Mol3 "
+        "forward-prediction model (remote HTTP; may be slow). Placeholder until deployed: with "
+        "no api_url set it reports status='unavailable'. Predictions are references worth "
+        "cross-checking; does not read NMR/MS spectra, so spectrum matching needs a follow-up NMR tool."
     )
 
     def __init__(self, config: Unimol3ReactionForwardPredictConfig | None = None) -> None:

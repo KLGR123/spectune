@@ -18,8 +18,9 @@ from .base import JsonDict, Tool, ToolResult
 class SemanticScholarSearchTool(Tool):
     name = "semantic_scholar_search"
     description = (
-        "Search academic papers via the Semantic Scholar Graph API. Returns paper "
-        "metadata (title, year, venue, authors, abstract); does not fetch full text."
+        "Search academic papers via the external Semantic Scholar API, returning metadata "
+        "(title, year, venue, authors, abstract); no full text. The remote call may be slow; "
+        "a reliable metadata reference, though coverage can be incomplete."
     )
 
     def __init__(self, config: SemanticScholarSearchConfig | None = None) -> None:
