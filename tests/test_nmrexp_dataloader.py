@@ -103,10 +103,11 @@ def _write_raw_csv(path, rows):
 
 
 def _config(raw_dir, processed_dir, **overrides) -> NmrExpDataLoaderConfig:
-    # Tests default to a single "checked" source so `load()`/`preprocess()` with
+    # Tests default to a single checked test source so preprocessing with
     # no arguments don't need every entry of the real 7-source default mapping
-    # to exist on disk; override `sources=` explicitly to test merging.
+    # to exist on disk; override both mappings to test train/test separation.
     overrides.setdefault("sources", {"checked": "test_300_checked.csv"})
+    overrides.setdefault("truth_splits", {"test": ("checked",)})
     return NmrExpDataLoaderConfig(raw_dir=str(raw_dir), processed_dir=str(processed_dir), **overrides)
 
 
@@ -118,8 +119,8 @@ class TestPreprocessBuildsTruth:
         _write_checked_csv(raw_dir / "test_300_checked.csv", rows)
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
-        summary = loader.preprocess()
-        dataset = loader.load()
+        summary = loader.preprocess()["test"]
+        dataset = loader.load_truth("test")
 
         assert summary["status"] == "built"
         assert summary["sources"]["checked"]["is_checked"] is True
@@ -134,10 +135,15 @@ class TestPreprocessBuildsTruth:
 
     def test_falls_back_to_raw_smiles_when_source_is_unchecked_no_quality_block(self, raw_dir, processed_dir):
         _write_raw_csv(raw_dir / "raw.csv", [_base_row(SMILES="CCO")])
-        config = _config(raw_dir, processed_dir, sources={"raw": "raw.csv"})
+        config = _config(
+            raw_dir,
+            processed_dir,
+            sources={"raw": "raw.csv"},
+            truth_splits={"train": ("raw",)},
+        )
         loader = NmrExpDataLoader(config)
 
-        dataset = loader.load()
+        dataset = loader.load_truth("train")
 
         assert len(dataset) == 1
         record = dataset[0]
@@ -148,7 +154,7 @@ class TestPreprocessBuildsTruth:
         _write_checked_csv(raw_dir / "test_300_checked.csv", [_checked_row()])
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
-        record = loader.load()[0]
+        record = loader.load_truth("test")[0]
 
         assert record["nmr"]["type"] == "1H NMR"
         assert record["nmr"]["frequency"] == "400 MHz"
@@ -161,9 +167,18 @@ class TestPreprocessBuildsTruth:
         _write_checked_csv(raw_dir / "test_300_checked.csv", [_checked_row()])
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
-        record = loader.load()[0]
+        record = loader.load_truth("test")[0]
 
-        assert set(record["provenance"]) == {"dataset", "source", "source_file", "row_index", "filename", "smiles_raw"}
+        assert set(record["provenance"]) == {
+            "dataset",
+            "split",
+            "source",
+            "source_file",
+            "row_index",
+            "filename",
+            "smiles_raw",
+        }
+        assert record["provenance"]["split"] == "test"
         assert record["provenance"]["source"] == "checked"
 
     def test_drops_rows_with_empty_gt_smiles(self, raw_dir, processed_dir):
@@ -173,7 +188,7 @@ class TestPreprocessBuildsTruth:
         )
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
-        summary = loader.preprocess()
+        summary = loader.preprocess()["test"]
 
         assert summary["kept"] == 1
         assert summary["dropped_empty_gt_smiles"] == 1
@@ -185,7 +200,7 @@ class TestPreprocessBuildsTruth:
         )
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
-        summary = loader.preprocess()
+        summary = loader.preprocess()["test"]
 
         assert summary["kept"] == 1
         assert summary["dropped_qc_wrong"] == 1
@@ -197,7 +212,7 @@ class TestPreprocessBuildsTruth:
         )
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir, drop_qc_wrong=False))
 
-        summary = loader.preprocess()
+        summary = loader.preprocess()["test"]
 
         assert summary["kept"] == 2
 
@@ -208,7 +223,7 @@ class TestPreprocessBuildsTruth:
         )
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir, min_quality="same_skeleton"))
 
-        summary = loader.preprocess()
+        summary = loader.preprocess()["test"]
 
         assert summary["kept"] == 1
         assert summary["dropped_quality"] == 1
@@ -220,7 +235,7 @@ class TestPreprocessBuildsTruth:
         )
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir, allowed_nmr_types=("1H NMR",)))
 
-        summary = loader.preprocess()
+        summary = loader.preprocess()["test"]
 
         assert summary["kept"] == 1
         assert summary["dropped_nmr_type"] == 1
@@ -229,10 +244,10 @@ class TestPreprocessBuildsTruth:
         _write_checked_csv(raw_dir / "test_300_checked.csv", [_checked_row() for _ in range(5)])
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir, max_records=2))
 
-        summary = loader.preprocess()
+        summary = loader.preprocess()["test"]
 
         assert summary["kept"] == 2
-        assert len(loader.load()) == 2
+        assert len(loader.load_truth("test")) == 2
 
     def test_sample_ids_are_stable_across_reprocessing(self, raw_dir, processed_dir):
         _write_checked_csv(
@@ -241,47 +256,61 @@ class TestPreprocessBuildsTruth:
         )
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
-        ids_before = [record["sample_id"] for record in loader.load()]
+        ids_before = [record["sample_id"] for record in loader.load_truth("test")]
         loader.preprocess(overwrite=True)
-        ids_after = [record["sample_id"] for record in loader.load()]
+        ids_after = [record["sample_id"] for record in loader.load_truth("test")]
 
         assert ids_before == ids_after
-        assert ids_before == ["NMRexp:checked:0", "NMRexp:checked:2"]
+        assert ids_before == ["NMRexp:test:checked:0", "NMRexp:test:checked:2"]
 
 
-class TestMergesMultipleSources:
-    def test_preprocess_merges_every_configured_source_into_one_truth_file(self, raw_dir, processed_dir):
+class TestTruthSplits:
+    def test_preprocess_separates_raw_train_from_checked_test(self, raw_dir, processed_dir):
         _write_raw_csv(raw_dir / "raw.csv", [_base_row(SMILES="CCO"), _base_row(SMILES="CCN")])
         _write_checked_csv(raw_dir / "test_300_checked.csv", [_checked_row(SMILES="c1ccccc1")])
-        config = _config(raw_dir, processed_dir, sources={"raw": "raw.csv", "checked": "test_300_checked.csv"})
+        config = _config(
+            raw_dir,
+            processed_dir,
+            sources={"raw": "raw.csv", "checked": "test_300_checked.csv"},
+            truth_splits={"train": ("raw",), "test": ("checked",)},
+        )
         loader = NmrExpDataLoader(config)
 
-        summary = loader.preprocess()
-        dataset = loader.load()
+        summaries = loader.preprocess()
+        train = loader.load_truth_train()
+        test = loader.load_truth_test()
 
-        assert summary["status"] == "built"
-        assert summary["kept"] == 3
-        assert summary["sources"]["raw"]["kept"] == 2
-        assert summary["sources"]["raw"]["is_checked"] is False
-        assert summary["sources"]["checked"]["kept"] == 1
-        assert summary["sources"]["checked"]["is_checked"] is True
-        assert len(dataset) == 3
-        by_source = {record["provenance"]["source"]: record["quality"] for record in dataset}
-        assert set(by_source) == {"raw", "checked"}
-        # unchecked rows carry no quality block, checked rows do
-        assert by_source["raw"] is None
-        assert by_source["checked"] is not None
+        assert set(summaries) == {"train", "test"}
+        assert summaries["train"]["kept"] == 2
+        assert summaries["train"]["sources"]["raw"]["is_checked"] is False
+        assert summaries["test"]["kept"] == 1
+        assert summaries["test"]["sources"]["checked"]["is_checked"] is True
+        assert len(train) == 2
+        assert len(test) == 1
+        assert all(record["quality"] is None for record in train)
+        assert test[0]["quality"] is not None
+        assert {record["provenance"]["split"] for record in train} == {"train"}
+        assert {record["provenance"]["split"] for record in test} == {"test"}
+        assert (processed_dir / "nmrexp_truth_train.jsonl").exists()
+        assert (processed_dir / "nmrexp_truth_test.jsonl").exists()
 
-    def test_preprocess_can_select_a_subset_of_configured_sources(self, raw_dir, processed_dir):
+    def test_preprocess_can_select_one_truth_split(self, raw_dir, processed_dir):
         _write_raw_csv(raw_dir / "raw.csv", [_base_row()])
         _write_checked_csv(raw_dir / "test_300_checked.csv", [_checked_row()])
-        config = _config(raw_dir, processed_dir, sources={"raw": "raw.csv", "checked": "test_300_checked.csv"})
+        config = _config(
+            raw_dir,
+            processed_dir,
+            sources={"raw": "raw.csv", "checked": "test_300_checked.csv"},
+            truth_splits={"train": ("raw",), "test": ("checked",)},
+        )
         loader = NmrExpDataLoader(config)
 
-        summary = loader.preprocess(["checked"])
+        summaries = loader.preprocess(["test"])
 
-        assert summary["kept"] == 1
-        assert set(summary["sources"]) == {"checked"}
+        assert set(summaries) == {"test"}
+        assert summaries["test"]["kept"] == 1
+        assert not (processed_dir / "nmrexp_truth_train.jsonl").exists()
+        assert (processed_dir / "nmrexp_truth_test.jsonl").exists()
 
 
 class TestPreprocessCachingAndErrors:
@@ -292,8 +321,8 @@ class TestPreprocessCachingAndErrors:
         first = loader.preprocess()
         second = loader.preprocess()
 
-        assert first["status"] == "built"
-        assert second["status"] == "cached"
+        assert first["test"]["status"] == "built"
+        assert second["test"]["status"] == "cached"
 
     def test_preprocess_overwrite_rebuilds(self, raw_dir, processed_dir):
         _write_checked_csv(raw_dir / "test_300_checked.csv", [_checked_row()])
@@ -302,27 +331,41 @@ class TestPreprocessCachingAndErrors:
 
         rebuilt = loader.preprocess(overwrite=True)
 
-        assert rebuilt["status"] == "built"
+        assert rebuilt["test"]["status"] == "built"
 
     def test_load_auto_preprocesses_when_cache_missing(self, raw_dir, processed_dir):
         _write_checked_csv(raw_dir / "test_300_checked.csv", [_checked_row()])
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
-        dataset = loader.load()
+        dataset = loader.load_truth("test")
 
         assert len(dataset) == 1
 
-    def test_unknown_source_raises_key_error(self, raw_dir, processed_dir):
+    def test_unknown_split_raises_key_error(self, raw_dir, processed_dir):
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
         with pytest.raises(KeyError):
             loader.preprocess(["does-not-exist"])
+        with pytest.raises(KeyError):
+            loader.load_truth("does-not-exist")
+
+    def test_split_referencing_unknown_source_raises_key_error(self, raw_dir, processed_dir):
+        loader = NmrExpDataLoader(
+            _config(
+                raw_dir,
+                processed_dir,
+                truth_splits={"test": ("missing-source",)},
+            )
+        )
+
+        with pytest.raises(KeyError, match="missing-source"):
+            loader.preprocess()
 
     def test_missing_raw_file_raises_file_not_found(self, raw_dir, processed_dir):
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
         with pytest.raises(FileNotFoundError):
-            loader.load()
+            loader.load_truth("test")
 
     def test_missing_base_column_raises_value_error(self, raw_dir, processed_dir):
         import pandas as pd
@@ -334,7 +377,7 @@ class TestPreprocessCachingAndErrors:
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
         with pytest.raises(ValueError, match="NMR_solvent"):
-            loader.load()
+            loader.load_truth("test")
 
     def test_partial_checked_columns_raises_value_error(self, raw_dir, processed_dir):
         import pandas as pd
@@ -346,15 +389,15 @@ class TestPreprocessCachingAndErrors:
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
         with pytest.raises(ValueError, match="is_same_skeleton"):
-            loader.load()
+            loader.load_truth("test")
 
 
-class TestLoadTruthConvenienceMethod:
-    def test_load_truth_is_an_alias_for_load(self, raw_dir, processed_dir):
+class TestLoadTruthConvenienceMethods:
+    def test_load_truth_test_is_an_alias_for_explicit_test_split(self, raw_dir, processed_dir):
         _write_checked_csv(raw_dir / "test_300_checked.csv", [_checked_row()])
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
-        assert [r["sample_id"] for r in loader.load_truth()] == [r["sample_id"] for r in loader.load()]
+        assert [r["sample_id"] for r in loader.load_truth_test()] == [r["sample_id"] for r in loader.load_truth("test")]
 
 
 @pytest.mark.skipif(not _HAS_PYARROW, reason="pyarrow/fastparquet is not installed")
@@ -366,7 +409,12 @@ class TestRealParquetSource:
         pd.DataFrame([_base_row(SMILES="CCN(CC)CC")], columns=_BASE_COLUMNS).to_parquet(
             raw_dir / "NMRexp_10to24_1_1004.parquet"
         )
-        config = _config(raw_dir, processed_dir, sources={"raw": "NMRexp_10to24_1_1004.parquet"})
+        config = _config(
+            raw_dir,
+            processed_dir,
+            sources={"raw": "NMRexp_10to24_1_1004.parquet"},
+            truth_splits={"train": ("raw",)},
+        )
         loader = NmrExpDataLoader(config)
 
         dataset = loader.load()

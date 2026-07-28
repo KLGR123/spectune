@@ -48,19 +48,23 @@ source secrets.env
 
 ## Datasets
 
-Neither loader below produces train/test splits -- that happens later, once
-**queries** are clustered into seed questions and matched against **truth**
-to build an augmented, trainable dataset (not implemented yet).
+SpecXMaster produces one **queries** pool. NMRexp preserves separate
+**truth_train** and **truth_test** pools; later, queries will be clustered into
+seed questions and sampled against each truth split independently to produce
+the final train/test datasets (not implemented yet).
 
-**NMRexp** -- a labeled spectrum-to-structure dataset, merged into one `truth` pool (ground-truth SMILES paired with NMR evidence):
+**NMRexp** -- labeled spectrum-to-structure truth (ground-truth SMILES paired
+with NMR evidence). The raw parquet forms the train truth; all human-checked
+CSV sources are merged into the test truth:
 
 ```python
 from spectune import NmrExpDataLoader
 
 loader = NmrExpDataLoader()  # raw_dir defaults to /fs_mol/liujiarun/data/NMRexp
-truth = loader.load_truth()  # merges every configured source into one JSON-Lines cache under ./datasets
-print(len(truth))
-for sample in truth.take(3):
+truth_train = loader.load_truth_train()  # ./datasets/nmrexp_truth_train.jsonl
+truth_test = loader.load_truth_test()    # ./datasets/nmrexp_truth_test.jsonl
+print(len(truth_train), len(truth_test))
+for sample in truth_test.take(3):
     print(sample["gt_smiles"], sample["nmr"]["type"], sample["modality"])
 ```
 
