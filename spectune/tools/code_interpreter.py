@@ -15,9 +15,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from spectune.config import CodeInterpreterConfig
-
 from .base import JsonDict, Tool, ToolResult
+from .config import CodeInterpreterConfig
 from .utils import extract_last_json
 
 

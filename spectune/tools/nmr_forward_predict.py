@@ -7,9 +7,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from spectune.config import NmrForwardPredictConfig
-
 from .base import JsonDict, Tool, ToolResult
+from .config import NmrForwardPredictConfig
 from .utils import canonical_smiles, experimental_shift_lists, float_list, molecular_formula
 
 

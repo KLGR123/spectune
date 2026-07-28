@@ -14,9 +14,8 @@ import asyncio
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from spectune.config import Unimol3ReactionForwardPredictConfig
-
 from .base import JsonDict, Tool, ToolResult
+from .config import Unimol3ReactionForwardPredictConfig
 from .utils import as_list, molecular_formula, post_json, strict_canonical_smiles
 
 

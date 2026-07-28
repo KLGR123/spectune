@@ -9,9 +9,8 @@ import urllib.request
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from spectune.config import WebSearchConfig
-
 from .base import JsonDict, Tool, ToolResult
+from .config import WebSearchConfig
 
 
 class WebSearchTool(Tool):

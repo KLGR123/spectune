@@ -10,9 +10,8 @@ import urllib.request
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from spectune.config import AskcosReactionForwardPredictConfig
-
 from .base import JsonDict, Tool, ToolResult
+from .config import AskcosReactionForwardPredictConfig
 from .utils import as_list, molecular_formula, strict_canonical_smiles
 
 _BACKENDS = {"wldn5", "augmented_transformer", "graph2smiles"}
