@@ -16,9 +16,9 @@ submission followed by clarifying replies) plus the conversation's
 ``modality``. The result is a flat collection of records called ``queries`` --
 meant to be clustered/deduplicated downstream into a smaller set of
 representative "seed" questions, which then get matched against
-:class:`~spectune.dataloader.nmrexp.NmrExpDataLoader`'s ``truth`` to build an
-augmented, trainable dataset. Both the clustering and the augmentation are out
-of scope for this loader.
+:class:`~spectune.dataloader.nmrexp.NmrExpDataLoader`'s train/test truth splits
+to build the final train/test datasets. Both the clustering and the
+augmentation are out of scope for this loader.
 """
 
 from __future__ import annotations
@@ -51,9 +51,9 @@ class SpecXMasterDataLoader:
 
     Unlike :class:`~spectune.dataloader.nmrexp.NmrExpDataLoader`, there is no
     ``sources``/split concept: SpecXMaster is one undifferentiated pool of real
-    user queries, not a train/test-labeled dataset. Splitting happens later,
-    once these queries are clustered into seeds and combined with NMRexp's
-    ``truth`` into an augmented dataset.
+    user queries, not a train/test-labeled dataset. These queries are clustered
+    into seeds later, then sampled separately against NMRexp's train/test truth
+    to build the final datasets.
     """
 
     def __init__(self, config: SpecXMasterDataLoaderConfig | None = None) -> None:

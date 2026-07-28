@@ -1,16 +1,14 @@
 """Dataset loading and preprocessing for spectune.
 
 Every data source gets a two-stage loader: a ``preprocess()`` step that reads
-raw exports and caches a normalized, merged JSON-Lines file, and a ``load()``
-step that returns an iterable/indexable
-:class:`~spectune.dataloader.base.Dataset` over that cache. Neither loader
-produces train/test splits at this stage -- that happens downstream, after
-:mod:`spectune.dataloader.specxmaster`'s ``queries`` are clustered into seed
-questions and matched against :mod:`spectune.dataloader.nmrexp`'s ``truth`` to
-build an augmented, trainable dataset:
+raw exports and caches normalized JSON-Lines files, and a ``load()`` step that
+returns an iterable/indexable :class:`~spectune.dataloader.base.Dataset` over
+those caches. SpecXMaster produces one query pool; NMRexp preserves separate
+train/test truth pools so each can later be combined independently with seeds
+sampled from those queries:
 
 - :mod:`spectune.dataloader.nmrexp` -- a labeled dataset (ground-truth SMILES
-  paired with NMR evidence), merged into one ``truth`` pool.
+  paired with NMR evidence), split into ``truth_train`` and ``truth_test``.
 - :mod:`spectune.dataloader.specxmaster` -- raw unlabeled production traffic
   (real user conversations), merged into one ``queries`` pool.
 """

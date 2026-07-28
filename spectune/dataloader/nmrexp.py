@@ -14,12 +14,11 @@ candidate molecular structure. It ships as two schema-compatible shapes:
 Both shapes share the same 15 base columns (enforced by :func:`_validate_schema`
 below), so :class:`NmrExpDataLoader` normalizes every configured source into
 one flat record schema (a resolved ``gt_smiles``, the NMR evidence, and
-provenance/QC metadata) and merges them into a single ``truth`` pool -- there
-is no train/test split here. ``truth`` pairs with
-:class:`~spectune.dataloader.specxmaster.SpecXMasterDataLoader`'s ``queries``:
-downstream, queries get clustered into seed questions, seeds get matched
-against truth to build augmented training examples, and *that* stage is where
-train/test splitting will eventually happen -- not this one.
+provenance/QC metadata). The raw export becomes ``truth_train`` while the
+human-checked exports are merged into ``truth_test``. Downstream, each truth
+split will be combined independently with seeds sampled from
+:class:`~spectune.dataloader.specxmaster.SpecXMasterDataLoader`'s ``queries``
+to produce the final train/test datasets.
 """
 
 from __future__ import annotations
@@ -77,17 +76,17 @@ _CHECKED_COLUMNS = (
 
 
 class NmrExpDataLoader:
-    """Loads every configured NMRexp raw export into one merged ``truth`` pool.
+    """Loads NMRexp exports into separate ``truth_train``/``truth_test`` pools.
 
     1. :meth:`preprocess` reads the raw parquet/CSV file(s) named in
        ``config.sources``, resolves one ground-truth SMILES per row,
-       normalizes NMR/provenance/QC fields into a single flat schema, and
-       appends every source's rows into one cached JSON-Lines file under
-       ``config.processed_dir``.
+       normalizes NMR/provenance/QC fields into a single flat schema, and writes
+       the source groups configured in ``config.truth_splits`` to separate
+       cached JSON-Lines files under ``config.processed_dir``.
     2. :meth:`load` (aliased :meth:`load_truth`) returns a
-       :class:`~spectune.dataloader.base.JsonlDataset` over that cache --
-       sized, indexable, and repeatably iterable -- building it on first use
-       if the cache is missing.
+       :class:`~spectune.dataloader.base.JsonlDataset` for one truth split --
+       sized, indexable, and repeatably iterable -- building that split on
+       first use if its cache is missing.
 
     Ground-truth SMILES resolution: the raw export only has a single
     ``SMILES`` column (machine-extracted, unverified), so it is used as-is. The
@@ -112,79 +111,115 @@ class NmrExpDataLoader:
 
     def preprocess(
         self,
-        sources: Sequence[str] | None = None,
+        splits: Sequence[str] | None = None,
         *,
         overwrite: bool = False,
-    ) -> JsonDict:
-        """Build (or reuse) the cached, merged ``truth`` JSON-Lines file.
+    ) -> dict[str, JsonDict]:
+        """Build (or reuse) cached JSON-Lines files for requested truth splits.
 
-        Returns a summary dict: ``status: "cached"`` if the cache was reused,
-        or ``status: "built"`` with aggregate row-count/drop-reason stats plus
-        a ``sources`` breakdown per configured source name.
+        Returns a mapping from split name to its cache/build summary. With the
+        default config this writes ``nmrexp_truth_train.jsonl`` from the raw
+        parquet and ``nmrexp_truth_test.jsonl`` from all checked CSV sources.
         """
         if not has_pandas():
             raise RuntimeError("pandas is required for NmrExpDataLoader; install spectune[data]")
 
         config = self.config
-        target_sources = list(sources) if sources is not None else list(config.sources)
-        unknown = [name for name in target_sources if name not in config.sources]
-        if unknown:
-            raise KeyError(f"unknown NMRexp source(s) {unknown}; configured sources: {sorted(config.sources)}")
+        target_splits = list(splits) if splits is not None else list(config.truth_splits)
+        unknown_splits = [name for name in target_splits if name not in config.truth_splits]
+        if unknown_splits:
+            raise KeyError(
+                f"unknown NMRexp truth split(s) {unknown_splits}; configured splits: {sorted(config.truth_splits)}"
+            )
 
-        out_path = self._processed_path()
-        if out_path.exists() and not overwrite:
-            return {"status": "cached", "output_path": str(out_path)}
-
+        summaries: dict[str, JsonDict] = {}
         raw_dir = Path(config.raw_dir)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
-        totals: JsonDict = {
-            "source_rows": 0,
-            "kept": 0,
-            "dropped_empty_gt_smiles": 0,
-            "dropped_nmr_type": 0,
-            "dropped_quality": 0,
-            "dropped_qc_wrong": 0,
-        }
-        per_source: JsonDict = {}
-        with tmp_path.open("w", encoding="utf-8") as handle:
-            for source_key in target_sources:
-                source_name = config.sources[source_key]
-                source_path = raw_dir / source_name
-                if not source_path.exists():
-                    raise FileNotFoundError(
-                        f"NMRexp raw source {source_key!r} not found: {source_path} "
-                        "(set NMREXP_RAW_DIR or pass a NmrExpDataLoaderConfig(raw_dir=...))"
-                    )
-                frame = _read_raw_table(source_path)
-                is_checked = _validate_schema(frame, source_path)
-                stats = _normalize_and_write(
-                    frame,
-                    handle,
-                    source_key=source_key,
-                    source_name=source_name,
-                    is_checked=is_checked,
-                    config=config,
-                )
-                per_source[source_key] = {"is_checked": is_checked, **stats}
-                for key, value in stats.items():
-                    totals[key] = totals.get(key, 0) + value
-        tmp_path.replace(out_path)
-        return {"status": "built", "output_path": str(out_path), "sources": per_source, **totals}
+        for split in target_splits:
+            out_path = self._processed_path(split)
+            if out_path.exists() and not overwrite:
+                summaries[split] = {"status": "cached", "output_path": str(out_path)}
+                continue
 
-    def load(self, *, force_reprocess: bool = False) -> JsonlDataset:
-        """Return the merged ``truth`` :class:`JsonlDataset`, building it if needed."""
-        out_path = self._processed_path()
+            source_keys = config.truth_splits[split]
+            unknown_sources = [name for name in source_keys if name not in config.sources]
+            if unknown_sources:
+                raise KeyError(
+                    f"NMRexp truth split {split!r} references unknown source(s) {unknown_sources}; "
+                    f"configured sources: {sorted(config.sources)}"
+                )
+
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+            totals: JsonDict = {
+                "source_rows": 0,
+                "kept": 0,
+                "dropped_empty_gt_smiles": 0,
+                "dropped_nmr_type": 0,
+                "dropped_quality": 0,
+                "dropped_qc_wrong": 0,
+            }
+            per_source: JsonDict = {}
+            with tmp_path.open("w", encoding="utf-8") as handle:
+                for source_key in source_keys:
+                    if config.max_records and totals["kept"] >= config.max_records:
+                        break
+                    record_limit = config.max_records - totals["kept"] if config.max_records else 0
+                    source_name = config.sources[source_key]
+                    source_path = raw_dir / source_name
+                    if not source_path.exists():
+                        raise FileNotFoundError(
+                            f"NMRexp raw source {source_key!r} for truth split {split!r} not found: {source_path} "
+                            "(set NMREXP_RAW_DIR or pass a NmrExpDataLoaderConfig(raw_dir=...))"
+                        )
+                    frame = _read_raw_table(source_path)
+                    is_checked = _validate_schema(frame, source_path)
+                    stats = _normalize_and_write(
+                        frame,
+                        handle,
+                        truth_split=split,
+                        source_key=source_key,
+                        source_name=source_name,
+                        is_checked=is_checked,
+                        config=config,
+                        record_limit=record_limit,
+                    )
+                    per_source[source_key] = {"is_checked": is_checked, **stats}
+                    for key, value in stats.items():
+                        totals[key] = totals.get(key, 0) + value
+            tmp_path.replace(out_path)
+            summaries[split] = {
+                "status": "built",
+                "output_path": str(out_path),
+                "sources": per_source,
+                **totals,
+            }
+        return summaries
+
+    def load(self, split: str = "train", *, force_reprocess: bool = False) -> JsonlDataset:
+        """Return one processed truth split, building its cache if needed."""
+        if split not in self.config.truth_splits:
+            raise KeyError(
+                f"unknown NMRexp truth split {split!r}; configured splits: {sorted(self.config.truth_splits)}"
+            )
+        out_path = self._processed_path(split)
         if force_reprocess or not out_path.exists():
-            self.preprocess(overwrite=force_reprocess)
+            self.preprocess([split], overwrite=force_reprocess)
         return JsonlDataset(out_path)
 
-    def load_truth(self, **kwargs: Any) -> JsonlDataset:
-        """Alias for :meth:`load`, named after the dataset it returns."""
-        return self.load(**kwargs)
+    def load_truth(self, split: str = "train", **kwargs: Any) -> JsonlDataset:
+        """Alias for :meth:`load`, explicitly named for truth datasets."""
+        return self.load(split, **kwargs)
 
-    def _processed_path(self) -> Path:
-        return Path(self.config.processed_dir) / f"{self.config.dataset_name.lower()}_truth.jsonl"
+    def load_truth_train(self, **kwargs: Any) -> JsonlDataset:
+        """Return the configured ``train`` truth split."""
+        return self.load_truth("train", **kwargs)
+
+    def load_truth_test(self, **kwargs: Any) -> JsonlDataset:
+        """Return the configured ``test`` truth split."""
+        return self.load_truth("test", **kwargs)
+
+    def _processed_path(self, split: str) -> Path:
+        return Path(self.config.processed_dir) / f"{self.config.dataset_name.lower()}_truth_{split}.jsonl"
 
 
 def _read_raw_table(path: Path) -> pd.DataFrame:
@@ -227,10 +262,12 @@ def _normalize_and_write(
     frame: pd.DataFrame,
     handle: IO[str],
     *,
+    truth_split: str,
     source_key: str,
     source_name: str,
     is_checked: bool,
     config: NmrExpDataLoaderConfig,
+    record_limit: int = 0,
 ) -> JsonDict:
     stats: JsonDict = {
         "source_rows": int(len(frame)),
@@ -243,12 +280,17 @@ def _normalize_and_write(
     rows = progress_iter(
         frame.itertuples(index=True),
         total=len(frame),
-        label=f"NMRexp/{source_key}",
+        label=f"NMRexp/{truth_split}/{source_key}",
         enabled=config.show_progress,
     )
     for row in rows:
         record, drop_reason = _build_record(
-            row, source_key=source_key, source_name=source_name, is_checked=is_checked, config=config
+            row,
+            truth_split=truth_split,
+            source_key=source_key,
+            source_name=source_name,
+            is_checked=is_checked,
+            config=config,
         )
         if record is None:
             stats[f"dropped_{drop_reason}"] += 1
@@ -256,7 +298,7 @@ def _normalize_and_write(
         handle.write(json.dumps(record, ensure_ascii=False))
         handle.write("\n")
         stats["kept"] += 1
-        if config.max_records and stats["kept"] >= config.max_records:
+        if record_limit and stats["kept"] >= record_limit:
             break
     return stats
 
@@ -264,6 +306,7 @@ def _normalize_and_write(
 def _build_record(
     row: Any,
     *,
+    truth_split: str,
     source_key: str,
     source_name: str,
     is_checked: bool,
@@ -304,7 +347,7 @@ def _build_record(
 
     row_index = int(row.Index)
     record: JsonDict = {
-        "sample_id": f"{config.dataset_name}:{source_key}:{row_index}",
+        "sample_id": f"{config.dataset_name}:{truth_split}:{source_key}:{row_index}",
         "modality": "nmr",
         "num_of_queries": 1,
         "gt_smiles": gt_smiles,
@@ -324,6 +367,7 @@ def _build_record(
         "ms": None,
         "provenance": {
             "dataset": config.dataset_name,
+            "split": truth_split,
             "source": source_key,
             "source_file": source_name,
             "row_index": row_index,

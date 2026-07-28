@@ -24,6 +24,19 @@ _DEFAULT_NMREXP_SOURCES: Mapping[str, str] = MappingProxyType(
         "checked_heteronuclei": "hetero_200_checked.csv",
     }
 )
+_DEFAULT_NMREXP_TRUTH_SPLITS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "train": ("raw",),
+        "test": (
+            "checked",
+            "checked_boron",
+            "checked_fluorine",
+            "checked_phosphorus",
+            "checked_silicon",
+            "checked_heteronuclei",
+        ),
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,19 +45,19 @@ class NmrExpDataLoaderConfig:
 
     ``raw_dir`` holds the raw NMRexp exports (the large unchecked ``raw``
     parquet plus the small human-checked CSV exports); ``processed_dir`` is
-    where ``preprocess()`` caches the normalized, merged JSON-Lines ``truth``
-    file that ``load()`` reads back. Both default to this cluster's layout but
-    are fully overridable, e.g. for a different filesystem or a scratch
-    directory.
+    where ``preprocess()`` caches normalized JSON-Lines truth files. Both
+    default to this cluster's layout but are fully overridable.
 
-    ``sources`` maps a source name to a raw filename under ``raw_dir``; every
-    configured source is merged into one ``truth`` pool by ``preprocess()`` --
-    there is no train/test split at this stage (that happens later, once
-    ``truth`` is combined with clustered ``queries``-derived seeds into an
-    augmented, trainable dataset). Add entries here (or pass a replacement
-    mapping) to preprocess additional checked subsets. ``min_quality``/
-    ``drop_qc_wrong`` only affect the checked CSV sources, since the raw
-    export carries no verification columns.
+    ``sources`` maps source names to raw filenames under ``raw_dir``.
+    ``truth_splits`` assigns those sources to output truth splits. By default,
+    the raw parquet becomes ``nmrexp_truth_train.jsonl`` and all checked CSV
+    sources are merged into ``nmrexp_truth_test.jsonl``. These remain *truth*
+    splits: downstream code will independently combine each with sampled seeds
+    to produce the final train/test datasets.
+
+    Add entries to both mappings (or pass replacements) to ingest additional
+    sources. ``min_quality``/``drop_qc_wrong`` only affect checked CSV sources,
+    since the raw export carries no verification columns.
 
     ``show_progress`` prints row-processed/rate/ETA to stderr while
     ``preprocess()`` runs; disable it for quiet/non-interactive runs (e.g. CI).
@@ -54,6 +67,7 @@ class NmrExpDataLoaderConfig:
     processed_dir: str = field(default_factory=lambda: os.getenv("SPECTUNE_DATASETS_DIR", "./datasets"))
     dataset_name: str = "NMRexp"
     sources: Mapping[str, str] = field(default_factory=lambda: _DEFAULT_NMREXP_SOURCES)
+    truth_splits: Mapping[str, tuple[str, ...]] = field(default_factory=lambda: _DEFAULT_NMREXP_TRUTH_SPLITS)
     canonicalize_smiles: bool = True
     drop_qc_wrong: bool = True
     min_quality: Literal["any", "same_skeleton", "same_molecule"] = "any"
@@ -70,9 +84,10 @@ class SpecXMasterDataLoaderConfig:
     not a labeled dataset, so unlike :class:`NmrExpDataLoaderConfig` there is
     no ``sources``/split mapping: every ``*.zip`` under ``raw_dir`` is read and
     merged into one ``queries`` pool, cached as a single JSON-Lines file under
-    ``processed_dir``. ``queries`` pairs with :class:`NmrExpDataLoaderConfig`'s
-    ``truth``: queries are meant to be clustered into seed questions downstream,
-    which then get matched against ``truth`` to build an augmented dataset.
+    ``processed_dir``. Queries are meant to be clustered into seed questions
+    downstream, then matched independently against
+    :class:`NmrExpDataLoaderConfig`'s train/test truth splits to build the final
+    train/test datasets.
 
     ``zip_glob`` selects which archives to read (relative to ``raw_dir``).
     ``show_progress`` prints per-archive progress to stderr while
