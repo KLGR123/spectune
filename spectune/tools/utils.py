@@ -84,14 +84,38 @@ def has_rdkit() -> bool:
     return True
 
 
+_rdkit_quieted = False
+
+
+def _rdkit_chem() -> Any:
+    """Import and return ``rdkit.Chem``, or ``None`` if rdkit is not installed.
+
+    Also disables RDKit's own C++-side logger (``rdApp.*``) the first time this
+    is called. That logger prints straight to stderr outside Python's
+    ``logging`` module (e.g. "Conflicting single bond directions..." on
+    ambiguous stereo), so it can't be silenced any other way, and doing it once
+    per row when canonicalizing a large dataset is itself real overhead.
+    """
+    global _rdkit_quieted
+    try:
+        from rdkit import Chem  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    if not _rdkit_quieted:
+        from rdkit import RDLogger  # type: ignore[import-not-found]
+
+        RDLogger.DisableLog("rdApp.*")
+        _rdkit_quieted = True
+    return Chem
+
+
 def canonical_smiles(smiles: str) -> str:
     """Canonicalize with RDKit when available, else pass the text through."""
     text = str(smiles or "").strip()
     if not text:
         return ""
-    try:
-        from rdkit import Chem  # type: ignore[import-not-found]
-    except ImportError:
+    Chem = _rdkit_chem()
+    if Chem is None:
         return text
     molecule = Chem.MolFromSmiles(text)
     if molecule is None:
@@ -111,9 +135,8 @@ def strict_canonical_smiles(smiles: str) -> str | None:
     text = str(smiles or "").strip()
     if not text:
         return None
-    try:
-        from rdkit import Chem  # type: ignore[import-not-found]
-    except ImportError:
+    Chem = _rdkit_chem()
+    if Chem is None:
         return text
     molecule = Chem.MolFromSmiles(text)
     if molecule is None:
@@ -126,15 +149,41 @@ def molecular_formula(smiles: str) -> str | None:
     text = str(smiles or "").strip()
     if not text:
         return None
-    try:
-        from rdkit import Chem  # type: ignore[import-not-found]
-        from rdkit.Chem import rdMolDescriptors  # type: ignore[import-not-found]
-    except ImportError:
+    Chem = _rdkit_chem()
+    if Chem is None:
         return None
+    from rdkit.Chem import rdMolDescriptors  # type: ignore[import-not-found]
+
     molecule = Chem.MolFromSmiles(text)
     if molecule is None:
         return None
     return str(rdMolDescriptors.CalcMolFormula(molecule))
+
+
+def canonical_smiles_and_formula(smiles: str) -> tuple[str, str | None]:
+    """Canonicalize ``smiles`` and compute its molecular formula from a single RDKit parse.
+
+    Equivalent to calling :func:`canonical_smiles` then :func:`molecular_formula`,
+    but parses the input once instead of twice. ``Chem.MolFromSmiles`` (parsing +
+    sanitization) dominates per-call cost, so this roughly halves RDKit time when
+    both values are needed for every row of a large dataset (e.g. NMRexp
+    preprocessing). Falls back to ``(text, None)`` if RDKit is unavailable or the
+    SMILES does not parse, matching ``canonical_smiles``/``molecular_formula``.
+    """
+    text = str(smiles or "").strip()
+    if not text:
+        return "", None
+    Chem = _rdkit_chem()
+    if Chem is None:
+        return text, None
+    from rdkit.Chem import rdMolDescriptors  # type: ignore[import-not-found]
+
+    molecule = Chem.MolFromSmiles(text)
+    if molecule is None:
+        return text, None
+    canonical = Chem.MolToSmiles(molecule, canonical=True, isomericSmiles=True)
+    formula = str(rdMolDescriptors.CalcMolFormula(molecule))
+    return canonical, formula
 
 
 # NMR spectrum helpers

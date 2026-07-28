@@ -5,9 +5,10 @@ Train your own spectrum-interpretation agent for NMR and EI-MS through a full pi
 ## Install
 
 ```bash
-pip install -e .                          # core package only
-pip install -e ".[dev]"                   # + pytest, ruff
-pip install -e ".[dev,chem,mcp,reaction]"  # + rdkit, fastmcp (nmr_forward_predict), pandas (chempile parquet)
+pip install -e .                              # core package only
+pip install -e ".[dev]"                       # + pytest, ruff
+pip install -e ".[dev,chem,mcp,reaction]"     # + rdkit, fastmcp (nmr_forward_predict), pandas (chempile parquet)
+pip install -e ".[dev,data]"                  # + pandas/pyarrow (dataloader parquet/CSV reads)
 ```
 
 ## Credentials
@@ -45,6 +46,40 @@ See `secrets.env.example`.
 source secrets.env
 ```
 
+## Datasets
+
+Neither loader below produces train/test splits -- that happens later, once
+**queries** are clustered into seed questions and matched against **truth**
+to build an augmented, trainable dataset (not implemented yet).
+
+**NMRexp** -- a labeled spectrum-to-structure dataset, merged into one `truth` pool (ground-truth SMILES paired with NMR evidence):
+
+```python
+from spectune import NmrExpDataLoader
+
+loader = NmrExpDataLoader()  # raw_dir defaults to /fs_mol/liujiarun/data/NMRexp
+truth = loader.load_truth()  # merges every configured source into one JSON-Lines cache under ./datasets
+print(len(truth))
+for sample in truth.take(3):
+    print(sample["gt_smiles"], sample["nmr"]["type"], sample["modality"])
+```
+
+Override paths via `NMREXP_RAW_DIR` / `SPECTUNE_DATASETS_DIR` (see `secrets.env.example`) or by passing a `NmrExpDataLoaderConfig` explicitly.
+
+**SpecXMaster** -- raw, unlabeled production traffic (zipped conversation-log exports), merged into one `queries` pool of real user questions:
+
+```python
+from spectune import SpecXMasterDataLoader
+
+loader = SpecXMasterDataLoader()  # raw_dir defaults to /fs_mol/liujiarun/data/SpecXMaster
+queries = loader.load_queries()  # unzips + caches JSON-Lines under ./datasets
+print(len(queries))
+for sample in queries.take(3):
+    print(sample["query"], sample["modality"])
+```
+
+Override paths via `SPECXMASTER_RAW_DIR` / `SPECTUNE_DATASETS_DIR` (see `secrets.env.example`) or by passing a `SpecXMasterDataLoaderConfig` explicitly.
+
 ## Tests
 
 ```bash
@@ -52,6 +87,7 @@ cd spectune
 pytest -v                                   # all tests; real-API tests skip if creds/config absent
 pytest -v tests/test_external_tools.py      # external calls (requires credentials/config above)
 SPECTUNE_ENABLE_NETWORK_TESTS=1 pytest -v tests/test_external_tools.py  # + credential-free public APIs
+pytest -v tests/test_dataloader_base.py tests/test_nmrexp_dataloader.py tests/test_specxmaster_dataloader.py  # dataloader only; NMRexp tests skip if pandas/pyarrow absent
 ```
 
 

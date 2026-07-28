@@ -6,9 +6,8 @@ import asyncio
 from collections.abc import Mapping
 from typing import Any
 
-from spectune.config import NmrRepairConfig
-
 from .base import JsonDict, Tool, ToolResult
+from .config import NmrRepairConfig
 from .utils import canonical_smiles, molecular_formula, post_json
 
 

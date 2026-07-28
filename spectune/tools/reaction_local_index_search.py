@@ -13,9 +13,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from spectune.config import ReactionLocalIndexSearchConfig
-
 from .base import JsonDict, Tool, ToolResult
+from .config import ReactionLocalIndexSearchConfig
 from .utils import as_list, has_rdkit, molecular_formula, strict_canonical_smiles
 
 _REACTION_SMILES_RE = re.compile(r"([^\s]+>>[^\s]+)")

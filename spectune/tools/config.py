@@ -219,8 +219,8 @@ class WikipediaSearchConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class SpectuneConfig:
-    """Top-level configuration used by the default tool manager."""
+class ToolManagerConfig:
+    """Aggregate of every tool's config, consumed by :meth:`ToolManager.from_config`."""
 
     web_search: WebSearchConfig = field(default_factory=WebSearchConfig)
     code_interpreter: CodeInterpreterConfig = field(default_factory=CodeInterpreterConfig)

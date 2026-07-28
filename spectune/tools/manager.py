@@ -6,11 +6,10 @@ import json
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from spectune.config import SpectuneConfig
-
 from .askcos_reaction_forward_predict import AskcosReactionForwardPredictTool
 from .base import JsonDict, Tool, ToolResult
 from .code_interpreter import CodeInterpreterTool
+from .config import ToolManagerConfig
 from .crossref_search import CrossrefSearchTool
 from .nmr_forward_predict import NmrForwardPredictTool
 from .nmr_generate import NmrGenerateTool
@@ -33,8 +32,8 @@ class ToolManager:
             self.register(tool)
 
     @classmethod
-    def from_config(cls, config: SpectuneConfig | None = None) -> ToolManager:
-        config = config or SpectuneConfig()
+    def from_config(cls, config: ToolManagerConfig | None = None) -> ToolManager:
+        config = config or ToolManagerConfig()
         return cls(
             [
                 WebSearchTool(config.web_search),

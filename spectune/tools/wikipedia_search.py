@@ -11,9 +11,8 @@ import urllib.request
 from collections.abc import Mapping
 from typing import Any
 
-from spectune.config import WikipediaSearchConfig
-
 from .base import JsonDict, Tool, ToolResult
+from .config import WikipediaSearchConfig
 
 _TAG_RE = re.compile(r"<[^>]+>")
 

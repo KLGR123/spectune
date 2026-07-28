@@ -10,9 +10,8 @@ import urllib.request
 from collections.abc import Mapping
 from typing import Any
 
-from spectune.config import SemanticScholarSearchConfig
-
 from .base import JsonDict, Tool, ToolResult
+from .config import SemanticScholarSearchConfig
 
 
 class SemanticScholarSearchTool(Tool):
