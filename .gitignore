@@ -37,3 +37,6 @@ Thumbs.db
 
 # Secrets
 secrets.env
+
+# Datasets
+datasets/
