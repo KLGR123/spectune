@@ -21,6 +21,9 @@ classifier = ["numpy", "scikit-learn", "matplotlib", "pillow", "rdkit", "torch",
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "external: tests that call real external services and are excluded from CI by default",
+]
 
 [tool.ruff]
 line-length = 120

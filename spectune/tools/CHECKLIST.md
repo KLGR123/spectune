@@ -2,6 +2,8 @@
 
 Last run: 2026-07-24 (`SPECTUNE_ENABLE_NETWORK_TESTS=1 pytest -v tests/test_external_tools.py`)
 
+These tests call live services and are marked `external`; default CI excludes them with `pytest -v -m "not external"`.
+
 | Tool | Status | Reason |
 |---|---|---|
 | `web_search` | PASS | — |

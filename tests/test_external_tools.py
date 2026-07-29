@@ -65,6 +65,8 @@ from spectune import (
     WikipediaSearchTool,
 )
 
+pytestmark = pytest.mark.external
+
 _HAS_EXTERNAL_WEB_SEARCH = bool(os.getenv("VOLCENGINE_WEBSEARCH_API_KEY"))
 _HAS_EXTERNAL_SANDBOX = bool(os.getenv("SANDBOX_FUSION_URL") or os.getenv("sandbox_fusion_url"))
 _HAS_EXTERNAL_NMR_GENERATE = bool(os.getenv("NMR_GENERATE_API_URL"))
