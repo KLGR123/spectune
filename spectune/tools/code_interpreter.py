@@ -130,9 +130,7 @@ class CodeInterpreterTool(Tool):
         if not success and stderr:
             data["stderr"] = stderr
         return ToolResult(
-            completion="success" if success else "failure",
-            status="ok" if success else "error",
-            data=data
+            completion="success" if success else "failure", status="ok" if success else "error", data=data
         )
 
     def _execute_local(self, code: str, stdin: str, timeout: int, language: str) -> ToolResult:

@@ -28,4 +28,4 @@ jobs:
       - name: Lint
         run: ruff check .
       - name: Test
-        run: pytest -v
+        run: pytest -v -m "not external"
