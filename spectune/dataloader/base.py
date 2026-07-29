@@ -57,6 +57,63 @@ class Dataset(ABC):
         random.Random(seed).shuffle(indices)
         return Subset(self, indices)
 
+    def sample(
+        self,
+        num: int,
+        *,
+        seed: int | None = None,
+        cluster_key: str = "cluster",
+    ) -> Subset:
+        """Sample at most ``num`` records, balancing clusters when available.
+
+        If every record has ``cluster_key``, the requested size is distributed
+        as evenly as possible across clusters; spare capacity from small
+        clusters is redistributed to larger ones. Sampling uses a two-pass
+        reservoir algorithm, so memory is ``O(num + clusters)`` even for a
+        multi-million-row :class:`JsonlDataset`. If any record lacks a cluster
+        label, the method falls back to uniform random sampling over the whole
+        dataset without scanning record contents a second time.
+        """
+        if num < 0:
+            raise ValueError("num must be non-negative")
+        target = min(num, len(self))
+        if target == 0:
+            return Subset(self, [])
+
+        counts: dict[Any, int] = {}
+        all_clustered = True
+        for record in self:
+            if cluster_key not in record or record[cluster_key] is None:
+                all_clustered = False
+                break
+            label = record[cluster_key]
+            counts[label] = counts.get(label, 0) + 1
+
+        rng = random.Random(seed)
+        if not all_clustered or not counts:
+            return Subset(self, rng.sample(range(len(self)), target))
+
+        quotas = _balanced_cluster_quotas(counts, target, rng)
+        reservoirs: dict[Any, list[int]] = {label: [] for label in counts}
+        seen: dict[Any, int] = {label: 0 for label in counts}
+        for index, record in enumerate(self):
+            label = record[cluster_key]
+            quota = quotas[label]
+            if quota == 0:
+                continue
+            seen[label] += 1
+            reservoir = reservoirs[label]
+            if len(reservoir) < quota:
+                reservoir.append(index)
+                continue
+            replacement = rng.randrange(seen[label])
+            if replacement < quota:
+                reservoir[replacement] = index
+
+        indices = [index for reservoir in reservoirs.values() for index in reservoir]
+        rng.shuffle(indices)
+        return Subset(self, indices)
+
     def filter(self, predicate: Callable[[JsonDict], bool]) -> InMemoryDataset:
         """Materialize the subset of records matching ``predicate`` in memory.
 
@@ -150,6 +207,24 @@ def _normalize_index(index: int, length: int) -> int:
     if not (0 <= index < length):
         raise IndexError(index)
     return index
+
+
+def _balanced_cluster_quotas(counts: dict[Any, int], target: int, rng: random.Random) -> dict[Any, int]:
+    labels = list(counts)
+    rng.shuffle(labels)
+    quotas = {label: min(counts[label], target // len(labels)) for label in labels}
+    remaining = target - sum(quotas.values())
+    while remaining:
+        eligible = [label for label in labels if quotas[label] < counts[label]]
+        if not eligible:
+            break
+        rng.shuffle(eligible)
+        for label in eligible:
+            quotas[label] += 1
+            remaining -= 1
+            if remaining == 0:
+                break
+    return quotas
 
 
 def _index_jsonl_offsets(path: Path) -> list[int]:

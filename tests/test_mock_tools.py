@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 from mock_servers import run_mock_sandbox_server, run_mock_web_search_server
 
@@ -71,6 +72,23 @@ def test_local_code_execution_returns_structured_result():
     assert result.status == "ok"
     assert result.data["stdout"] == 'hello\n{"answer": 42}\n'
     assert result.data["result_json"] == {"answer": 42}
+
+
+def test_code_execution_limits_numeric_library_threads():
+    tool = CodeInterpreterTool(CodeInterpreterConfig(backend="local", allow_local_execution=True))
+    original_openblas_threads = os.environ.get("OPENBLAS_NUM_THREADS")
+    code = (
+        "from __future__ import annotations\n"
+        "import json, os\n"
+        'print(json.dumps({"openblas": os.environ.get("OPENBLAS_NUM_THREADS"), '
+        '"omp": os.environ.get("OMP_NUM_THREADS")}))'
+    )
+
+    result = asyncio.run(tool.execute({"code": code}))
+
+    assert result.completion == "success"
+    assert result.data["result_json"] == {"openblas": "1", "omp": "1"}
+    assert os.environ.get("OPENBLAS_NUM_THREADS") == original_openblas_threads
 
 
 def test_manager_accepts_json_arguments():

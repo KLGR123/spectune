@@ -20,6 +20,20 @@ from .config import CodeInterpreterConfig
 from .utils import extract_last_json
 
 
+def _wrap_python_code(code: str) -> str:
+    """Run Python code with numerical libraries limited to one thread."""
+    return (
+        "import os as __spectune_os\n"
+        '__spectune_os.environ["OPENBLAS_NUM_THREADS"] = "1"\n'
+        '__spectune_os.environ["OMP_NUM_THREADS"] = "1"\n'
+        '__spectune_os.environ["MKL_NUM_THREADS"] = "1"\n'
+        '__spectune_os.environ["NUMEXPR_NUM_THREADS"] = "1"\n'
+        '__spectune_os.environ["BLIS_NUM_THREADS"] = "1"\n'
+        '__spectune_os.environ["VECLIB_MAXIMUM_THREADS"] = "1"\n'
+        f'exec(compile({code!r}, "<code_interpreter>", "exec"))\n'
+    )
+
+
 class CodeInterpreterTool(Tool):
     name = "code_interpreter"
     description = (
@@ -51,6 +65,8 @@ class CodeInterpreterTool(Tool):
         timeout = max(1, int(arguments.get("timeout") or self.config.timeout_s))
         language = str(arguments.get("language") or self.config.language)
         stdin = str(arguments.get("stdin") or "")
+        if language in {"python", "python3"}:
+            code = _wrap_python_code(code)
 
         if self.config.backend == "local":
             if not self.config.allow_local_execution:
@@ -104,17 +120,19 @@ class CodeInterpreterTool(Tool):
         stdout = self._truncate(str(run.get("stdout") or ""))
         stderr = self._truncate(str(run.get("stderr") or ""))
         success = raw.get("status") == "Success" and int(run.get("return_code") or 0) == 0
+        data = {
+            "backend": "sandbox",
+            "stdout": stdout,
+            "return_code": run.get("return_code"),
+            "execution_time": run.get("execution_time"),
+            "result_json": extract_last_json(stdout),
+        }
+        if not success and stderr:
+            data["stderr"] = stderr
         return ToolResult(
             completion="success" if success else "failure",
             status="ok" if success else "error",
-            data={
-                "backend": "sandbox",
-                "stdout": stdout,
-                "stderr": stderr,
-                "return_code": run.get("return_code"),
-                "execution_time": run.get("execution_time"),
-                "result_json": extract_last_json(stdout),
-            },
+            data=data
         )
 
     def _execute_local(self, code: str, stdin: str, timeout: int, language: str) -> ToolResult:
@@ -155,17 +173,19 @@ class CodeInterpreterTool(Tool):
         stdout = self._truncate(stdout)
         stderr = self._truncate(stderr)
         warnings = [f"execution exceeded {timeout}s"] if timed_out else []
+        data = {
+            "backend": "local",
+            "stdout": stdout,
+            "return_code": return_code,
+            "execution_time": time.monotonic() - started,
+            "result_json": extract_last_json(stdout),
+        }
+        if return_code != 0 or stderr:
+            data["stderr"] = stderr
         return ToolResult(
             completion="success" if return_code == 0 else "failure",
             status="ok" if return_code == 0 else "error",
-            data={
-                "backend": "local",
-                "stdout": stdout,
-                "stderr": stderr,
-                "return_code": return_code,
-                "execution_time": time.monotonic() - started,
-                "result_json": extract_last_json(stdout),
-            },
+            data=data,
             warnings=warnings,
         )
 

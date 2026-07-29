@@ -1,6 +1,3 @@
-# Dataset subdirectories (keep top-level files such as download scripts)
-/datasets/*/
-
 # Python bytecode and caches
 __pycache__/
 *.py[cod]
@@ -38,5 +35,5 @@ Thumbs.db
 # Secrets
 secrets.env
 
-# Datasets
-datasets/
+# outputs
+outputs/

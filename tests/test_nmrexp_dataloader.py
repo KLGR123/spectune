@@ -277,8 +277,8 @@ class TestTruthSplits:
         loader = NmrExpDataLoader(config)
 
         summaries = loader.preprocess()
-        train = loader.load_truth_train()
-        test = loader.load_truth_test()
+        train = loader.load_truth("train")
+        test = loader.load_truth("test")
 
         assert set(summaries) == {"train", "test"}
         assert summaries["train"]["kept"] == 2
@@ -393,11 +393,11 @@ class TestPreprocessCachingAndErrors:
 
 
 class TestLoadTruthConvenienceMethods:
-    def test_load_truth_test_is_an_alias_for_explicit_test_split(self, raw_dir, processed_dir):
+    def test_load_truth_is_an_alias_for_load(self, raw_dir, processed_dir):
         _write_checked_csv(raw_dir / "test_300_checked.csv", [_checked_row()])
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
-        assert [r["sample_id"] for r in loader.load_truth_test()] == [r["sample_id"] for r in loader.load_truth("test")]
+        assert [r["sample_id"] for r in loader.load_truth("test")] == [r["sample_id"] for r in loader.load("test")]
 
 
 @pytest.mark.skipif(not _HAS_PYARROW, reason="pyarrow/fastparquet is not installed")

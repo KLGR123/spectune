@@ -210,14 +210,6 @@ class NmrExpDataLoader:
         """Alias for :meth:`load`, explicitly named for truth datasets."""
         return self.load(split, **kwargs)
 
-    def load_truth_train(self, **kwargs: Any) -> JsonlDataset:
-        """Return the configured ``train`` truth split."""
-        return self.load_truth("train", **kwargs)
-
-    def load_truth_test(self, **kwargs: Any) -> JsonlDataset:
-        """Return the configured ``test`` truth split."""
-        return self.load_truth("test", **kwargs)
-
     def _processed_path(self, split: str) -> Path:
         return Path(self.config.processed_dir) / f"{self.config.dataset_name.lower()}_truth_{split}.jsonl"
 
@@ -349,7 +341,7 @@ def _build_record(
     record: JsonDict = {
         "sample_id": f"{config.dataset_name}:{truth_split}:{source_key}:{row_index}",
         "modality": "nmr",
-        "num_of_queries": 1,
+        # "num_of_queries": 1, # no need for truths
         "gt_smiles": gt_smiles,
         "molecular_formula": gt_formula,
         "nmr": {

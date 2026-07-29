@@ -83,6 +83,16 @@ class TestJsonlDataset:
         assert len(dataset) == 2
         assert list(dataset) == [{"id": 0}, {"id": 1}]
 
+    def test_cluster_balanced_sample_over_jsonl(self, tmp_path):
+        path = tmp_path / "clustered.jsonl"
+        write_jsonl(path, [{"id": index, "cluster": index // 4} for index in range(12)])
+        dataset = JsonlDataset(path)
+
+        sampled = dataset.sample(6, seed=5)
+        counts = {label: sum(record["cluster"] == label for record in sampled) for label in range(3)}
+
+        assert counts == {0: 2, 1: 2, 2: 2}
+
 
 class TestComposableViews:
     def test_take(self):
@@ -119,6 +129,42 @@ class TestComposableViews:
         dataset = InMemoryDataset(_records(20))
 
         assert [r["id"] for r in dataset.shuffle(seed=1)] != [r["id"] for r in dataset]
+
+    def test_sample_without_clusters_is_uniform_and_deterministic(self):
+        dataset = InMemoryDataset(_records(20))
+
+        sampled_a = dataset.sample(5, seed=7)
+        sampled_b = dataset.sample(5, seed=7)
+
+        assert len(sampled_a) == 5
+        assert [record["id"] for record in sampled_a] == [record["id"] for record in sampled_b]
+        assert len({record["id"] for record in sampled_a}) == 5
+
+    def test_sample_balances_clusters(self):
+        records = [
+            *({"id": index, "cluster": 0} for index in range(10)),
+            *({"id": 10 + index, "cluster": 1} for index in range(4)),
+            *({"id": 14 + index, "cluster": 2} for index in range(2)),
+        ]
+        dataset = InMemoryDataset(records)
+
+        sampled = dataset.sample(9, seed=3)
+        counts = {label: sum(record["cluster"] == label for record in sampled) for label in (0, 1, 2)}
+
+        assert len(sampled) == 9
+        assert sorted(counts.values()) == [2, 3, 4]
+
+    def test_sample_falls_back_to_random_when_cluster_is_missing(self):
+        records = [{"id": 0, "cluster": 0}, {"id": 1}, {"id": 2, "cluster": 1}]
+        dataset = InMemoryDataset(records)
+
+        sampled = dataset.sample(2, seed=1)
+
+        assert len(sampled) == 2
+
+    def test_sample_rejects_negative_size(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            InMemoryDataset(_records(2)).sample(-1)
 
     def test_filter_materializes_matches(self):
         dataset = InMemoryDataset(_records(10))
