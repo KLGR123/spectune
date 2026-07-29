@@ -5,11 +5,15 @@ Train your own spectrum-interpretation agent for NMR and EI-MS through a full pi
 ## Install
 
 ```bash
+cd spectune
 pip install -e .                              # core package only
 pip install -e ".[dev]"                       # + pytest, ruff
 pip install -e ".[dev,chem,mcp,reaction]"     # + rdkit, fastmcp (nmr_forward_predict), pandas (chempile parquet)
 pip install -e ".[dev,data]"                  # + pandas/pyarrow (dataloader parquet/CSV reads)
+pip install -e ".[dev,data,classifier]"       # + sklearn/RDKit/transformers/torch/matplotlib (clustering)
 ```
+
+
 
 ## Credentials
 
@@ -24,20 +28,7 @@ export NMR_REPAIR_API_URL=<url>             # nmr_repair
 export NMR_RANK_API_URL=<url>               # nmr_rerank
 export NMR_PREDICT_MCP_URL=<url>            # nmr_forward_predict (needs `pip install spectune[mcp]`)
 export NMREXP_SEARCH_MCP_BASE_URL=<url>     # nmrexp_search
-
-export RXN_LOCAL_INDEX_USPTO_CSV=<path>            # reaction_local_index_search (needs `pip install spectune[chem]`)
-export RXN_LOCAL_INDEX_CHEMPILE_PARQUET=<path>     # reaction_local_index_search (needs `pip install spectune[chem,reaction]`)
-export RXN_LOCAL_INDEX_PISTACHIO_SMI=<path>        # reaction_local_index_search (needs `pip install spectune[chem]`)
-# askcos_reaction_forward_predict calls the public https://askcos.mit.edu API by default; no credentials needed.
-# ASKCOS_PUBLIC_BASE_URL=<url>              # optional override, e.g. for a private ASKCOS deployment
-export UNIMOL3_REACTION_FORWARD_PREDICT_API_URL=<url> # unimol3_reaction_forward_predict; unset by default
-                                                       # (placeholder until a self-hosted Uni-Mol3
-                                                       # forward-prediction service is deployed)
-
-# semantic_scholar_search / crossref_search / wikipedia_search need no credentials.
-export SEMANTIC_SCHOLAR_API_KEY=<key>       # optional, raises Semantic Scholar rate limits
-export CROSSREF_MAILTO=<email>              # optional, joins Crossref's "polite pool"
-export WIKIPEDIA_LANGUAGE=<code>            # optional, defaults to "en"
+...
 ```
 
 See `secrets.env.example`. 
@@ -46,31 +37,24 @@ See `secrets.env.example`.
 source secrets.env
 ```
 
+
+
 ## Datasets
 
-SpecXMaster produces one **queries** pool. NMRexp preserves separate
-**truth_train** and **truth_test** pools; later, queries will be clustered into
-seed questions and sampled against each truth split independently to produce
-the final train/test datasets (not implemented yet).
-
-**NMRexp** -- labeled spectrum-to-structure truth (ground-truth SMILES paired
-with NMR evidence). The raw parquet forms the train truth; all human-checked
-CSV sources are merged into the test truth:
+Override paths via `NMREXP_RAW_DIR` / `SPECTUNE_DATASETS_DIR` (see `secrets.env.example`) or by passing a `NmrExpDataLoaderConfig` explicitly.
 
 ```python
 from spectune import NmrExpDataLoader
 
 loader = NmrExpDataLoader()  # raw_dir defaults to /fs_mol/liujiarun/data/NMRexp
-truth_train = loader.load_truth_train()  # ./datasets/nmrexp_truth_train.jsonl
-truth_test = loader.load_truth_test()    # ./datasets/nmrexp_truth_test.jsonl
+truth_train = loader.load_truth("train")  # ./datasets/nmrexp_truth_train.jsonl
+truth_test = loader.load_truth("test")    # ./datasets/nmrexp_truth_test.jsonl
 print(len(truth_train), len(truth_test))
 for sample in truth_test.take(3):
     print(sample["gt_smiles"], sample["nmr"]["type"], sample["modality"])
 ```
 
-Override paths via `NMREXP_RAW_DIR` / `SPECTUNE_DATASETS_DIR` (see `secrets.env.example`) or by passing a `NmrExpDataLoaderConfig` explicitly.
-
-**SpecXMaster** -- raw, unlabeled production traffic (zipped conversation-log exports), merged into one `queries` pool of real user questions:
+Override paths via `SPECXMASTER_RAW_DIR` / `SPECTUNE_DATASETS_DIR` (see `secrets.env.example`) or by passing a `SpecXMasterDataLoaderConfig` explicitly.
 
 ```python
 from spectune import SpecXMasterDataLoader
@@ -82,7 +66,41 @@ for sample in queries.take(3):
     print(sample["query"], sample["modality"])
 ```
 
-Override paths via `SPECXMASTER_RAW_DIR` / `SPECTUNE_DATASETS_DIR` (see `secrets.env.example`) or by passing a `SpecXMasterDataLoaderConfig` explicitly.
+
+
+## Classifier
+
+NMR truth and SpecXMaster queries use independent cluster counts. Classification
+visualizes both by default: NMR clusters are annotated with representative
+molecules, while query clusters are annotated with representative conversation
+text.
+
+```python
+from spectune import Classifier, ClassifierConfig
+
+classifier = Classifier(
+    ClassifierConfig(
+        nmr_n_clusters=256,  # millions of molecular structures
+        query_n_clusters=50,  # thousands of conversation-level queries
+        nmr_num_workers=16,  # parallel RDKit structure featurization
+        visualization_dim=2,  # 2 or 3; affects visualization only
+    )
+)
+truth_train = classifier.classify(
+    truth_train,
+    visualization_path="./outputs/truth_train_clusters.png",
+)
+queries = classifier.classify(
+    queries,
+    visualization_path="./outputs/query_clusters.png",
+)
+
+# Equal allocation across clusters; falls back to random sampling before classification.
+truth_sample = truth_train.sample(1_000, seed=42)
+query_sample = queries.sample(200, seed=42)
+```
+
+
 
 ## Tests
 
@@ -92,6 +110,7 @@ pytest -v                                   # all tests; real-API tests skip if 
 pytest -v tests/test_external_tools.py      # external calls (requires credentials/config above)
 SPECTUNE_ENABLE_NETWORK_TESTS=1 pytest -v tests/test_external_tools.py  # + credential-free public APIs
 pytest -v tests/test_dataloader_base.py tests/test_nmrexp_dataloader.py tests/test_specxmaster_dataloader.py  # dataloader only; NMRexp tests skip if pandas/pyarrow absent
+pytest -v tests/test_classifier.py           # classifier; optional-dependency tests skip if unavailable
 ```
 
 

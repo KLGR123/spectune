@@ -17,6 +17,7 @@ chem = ["rdkit"]
 mcp = ["fastmcp"]
 reaction = ["pandas"]
 data = ["pandas", "pyarrow"]
+classifier = ["numpy", "scikit-learn", "matplotlib", "pillow", "rdkit", "torch", "transformers"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

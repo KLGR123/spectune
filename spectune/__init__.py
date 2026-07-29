@@ -1,3 +1,4 @@
+from .classifier import Classifier, ClassifierConfig
 from .dataloader import (
     Dataset,
     InMemoryDataset,
@@ -44,6 +45,8 @@ from .tools import (
 __all__ = [
     "AskcosReactionForwardPredictConfig",
     "AskcosReactionForwardPredictTool",
+    "Classifier",
+    "ClassifierConfig",
     "CodeInterpreterConfig",
     "CodeInterpreterTool",
     "CrossrefSearchConfig",
