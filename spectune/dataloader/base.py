@@ -63,6 +63,7 @@ class Dataset(ABC):
         *,
         seed: int | None = None,
         cluster_key: str = "cluster",
+        progress: bool = True,
     ) -> Subset:
         """Sample at most ``num`` records, balancing clusters when available.
 
@@ -76,37 +77,50 @@ class Dataset(ABC):
         """
         if num < 0:
             raise ValueError("num must be non-negative")
-        target = min(num, len(self))
+        total = len(self)
+        target = min(num, total)
         if target == 0:
             return Subset(self, [])
 
         counts: dict[Any, int] = {}
         all_clustered = True
-        for record in self:
+        for record in progress_iter(
+            self,
+            total=total,
+            label="sample/scan",
+            enabled=progress,
+        ):
             if cluster_key not in record or record[cluster_key] is None:
                 all_clustered = False
                 break
-            label = record[cluster_key]
-            counts[label] = counts.get(label, 0) + 1
+            cluster_label = record[cluster_key]
+            counts[cluster_label] = counts.get(cluster_label, 0) + 1
 
         rng = random.Random(seed)
         if not all_clustered or not counts:
-            return Subset(self, rng.sample(range(len(self)), target))
+            return Subset(self, rng.sample(range(total), target))
 
         quotas = _balanced_cluster_quotas(counts, target, rng)
-        reservoirs: dict[Any, list[int]] = {label: [] for label in counts}
-        seen: dict[Any, int] = {label: 0 for label in counts}
-        for index, record in enumerate(self):
-            label = record[cluster_key]
-            quota = quotas[label]
+        reservoirs: dict[Any, list[int]] = {lbl: [] for lbl in counts}
+        seen: dict[Any, int] = {lbl: 0 for lbl in counts}
+        for index, record in enumerate(
+            progress_iter(
+                self,
+                total=total,
+                label="sample/reservoir",
+                enabled=progress,
+            )
+        ):
+            cluster_label = record[cluster_key]
+            quota = quotas[cluster_label]
             if quota == 0:
                 continue
-            seen[label] += 1
-            reservoir = reservoirs[label]
+            seen[cluster_label] += 1
+            reservoir = reservoirs[cluster_label]
             if len(reservoir) < quota:
                 reservoir.append(index)
                 continue
-            replacement = rng.randrange(seen[label])
+            replacement = rng.randrange(seen[cluster_label])
             if replacement < quota:
                 reservoir[replacement] = index
 
