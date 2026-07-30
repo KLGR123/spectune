@@ -1,3 +1,9 @@
+from .augmentor import (
+    Augmentor,
+    AugmentorConfig,
+    Enricher,
+    EnrichmentConfig,
+)
 from .classifier import Classifier, ClassifierConfig
 from .dataloader import (
     Dataset,
@@ -9,6 +15,7 @@ from .dataloader import (
     SpecXMasterDataLoaderConfig,
     Subset,
 )
+from .llm import LlmClient, LlmConfig
 from .tools import (
     AskcosReactionForwardPredictConfig,
     AskcosReactionForwardPredictTool,
@@ -45,6 +52,8 @@ from .tools import (
 __all__ = [
     "AskcosReactionForwardPredictConfig",
     "AskcosReactionForwardPredictTool",
+    "Augmentor",
+    "AugmentorConfig",
     "Classifier",
     "ClassifierConfig",
     "CodeInterpreterConfig",
@@ -52,8 +61,12 @@ __all__ = [
     "CrossrefSearchConfig",
     "CrossrefSearchTool",
     "Dataset",
+    "Enricher",
+    "EnrichmentConfig",
     "InMemoryDataset",
     "JsonlDataset",
+    "LlmClient",
+    "LlmConfig",
     "NmrExpDataLoader",
     "NmrExpDataLoaderConfig",
     "NmrExpSearchConfig",
