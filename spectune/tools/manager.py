@@ -26,8 +26,12 @@ from .wikipedia_search import WikipediaSearchTool
 class ToolManager:
     """Own tool instances and expose a single schema/dispatch interface."""
 
+    # Print a warning every time consecutive failures cross a multiple of this threshold.
+    FAILURE_WARN_THRESHOLD: int = 3
+
     def __init__(self, tools: Iterable[Tool] = ()) -> None:
         self._tools: dict[str, Tool] = {}
+        self._consecutive_failures: dict[str, int] = {}
         for tool in tools:
             self.register(tool)
 
@@ -94,10 +98,26 @@ class ToolManager:
             arguments = parsed
 
         try:
-            return await tool.execute(arguments or {})
+            result = await tool.execute(arguments or {})
         except Exception as exc:
-            return ToolResult(
+            result = ToolResult(
                 completion="failure",
                 status="error",
                 warnings=[f"{type(exc).__name__}: {exc}"],
             )
+
+        if result.completion == "failure":
+            self._consecutive_failures[name] = self._consecutive_failures.get(name, 0) + 1
+            n = self._consecutive_failures[name]
+            if n % self.FAILURE_WARN_THRESHOLD == 0:
+                print(
+                    f"[ToolManager] WARNING: tool '{name}' has failed {n} consecutive times. "
+                    f"Last error: {result.warnings}. "
+                    f"If the service is down, consider stopping your training run."
+                )
+        else:
+            if self._consecutive_failures.get(name):
+                print(f"[ToolManager] tool '{name}' recovered after {self._consecutive_failures[name]} failures.")
+            self._consecutive_failures[name] = 0
+
+        return result
