@@ -1,3 +1,8 @@
+from .artifacts import (
+    ArtifactCompileConfig,
+    compile_jsonl_file,
+    compile_sample,
+)
 from .augmentor import (
     Augmentor,
     AugmentorConfig,
@@ -15,7 +20,14 @@ from .dataloader import (
     SpecXMasterDataLoaderConfig,
     Subset,
 )
+from .format.v1 import (
+    FORMAT_SPEC_VERSION,
+    SYSTEM_PROMPT,
+    extract_smiles_candidates,
+    format_final_answer,
+)
 from .llm import LlmClient, LlmConfig
+from .reward import RewardConfig, RewardEvaluator, RewardResult
 from .tools import (
     AskcosReactionForwardPredictConfig,
     AskcosReactionForwardPredictTool,
@@ -52,6 +64,7 @@ from .tools import (
 __all__ = [
     "AskcosReactionForwardPredictConfig",
     "AskcosReactionForwardPredictTool",
+    "ArtifactCompileConfig",
     "Augmentor",
     "AugmentorConfig",
     "Classifier",
@@ -63,6 +76,7 @@ __all__ = [
     "Dataset",
     "Enricher",
     "EnrichmentConfig",
+    "FORMAT_SPEC_VERSION",
     "InMemoryDataset",
     "JsonlDataset",
     "LlmClient",
@@ -81,6 +95,10 @@ __all__ = [
     "NmrRerankTool",
     "ReactionLocalIndexSearchConfig",
     "ReactionLocalIndexSearchTool",
+    "RewardConfig",
+    "RewardEvaluator",
+    "RewardResult",
+    "SYSTEM_PROMPT",
     "SemanticScholarSearchConfig",
     "SemanticScholarSearchTool",
     "SpecXMasterDataLoader",
@@ -96,6 +114,10 @@ __all__ = [
     "WebSearchTool",
     "WikipediaSearchConfig",
     "WikipediaSearchTool",
+    "compile_jsonl_file",
+    "compile_sample",
+    "extract_smiles_candidates",
+    "format_final_answer",
 ]
 
 __version__ = "0.1.0"
