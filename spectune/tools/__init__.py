@@ -2,6 +2,7 @@
 
 from .askcos_reaction_forward_predict import AskcosReactionForwardPredictTool
 from .base import Tool, ToolResult
+from .catalog import DEFAULT_RL_TOOL_NAMES, resolve_tool_names, schemas_for_names
 from .code_interpreter import CodeInterpreterTool
 from .config import (
     AskcosReactionForwardPredictConfig,
@@ -39,6 +40,7 @@ __all__ = [
     "CodeInterpreterTool",
     "CrossrefSearchConfig",
     "CrossrefSearchTool",
+    "DEFAULT_RL_TOOL_NAMES",
     "NmrExpSearchConfig",
     "NmrExpSearchTool",
     "NmrForwardPredictConfig",
@@ -63,4 +65,6 @@ __all__ = [
     "WebSearchTool",
     "WikipediaSearchConfig",
     "WikipediaSearchTool",
+    "resolve_tool_names",
+    "schemas_for_names",
 ]

@@ -4,6 +4,8 @@
 
 Train your own spectrum-interpretation agent for NMR and EI-MS through a full pipeline: dataset construction and augmentation, rollout, post-training (SFT and RL), and end-to-end evaluation.
 
+Spectune owns data norms, sample construction, tools, and rewards; external trainers such as [verl](https://github.com/volcengine/verl) are optional adapters (Parquet mapping, rollout, distributed SFT/RL). The core package does not depend on torch, ray, or verl. See [`examples/verl/README.md`](examples/verl/README.md) for agentic tool RL.
+
 ## Install
 
 ```bash
