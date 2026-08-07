@@ -20,10 +20,8 @@ JsonDict = dict[str, Any]
 DEFAULT_RL_TOOL_NAMES: tuple[str, ...] = (
     "nmr_generate",
     "nmr_repair",
-    "nmr_rerank",
     "nmr_forward_predict",
-    "reaction_local_index_search",
-    "askcos_reaction_forward_predict",
+    # "reaction_local_index_search",
     "code_interpreter",
     "web_search",
 )

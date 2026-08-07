@@ -2,22 +2,27 @@
 
 Configured as::
 
-    reward.custom_reward_function.path=pkg://spectune.reward.verl
-    reward.custom_reward_function.name=compute_score
+    custom_reward_function.path=/abs/path/to/spectune/reward/verl.py
+    custom_reward_function.name=compute_score
+
+Stock verl loads this file via ``spec_from_file_location`` as a standalone
+module (not as ``spectune.reward``), so imports here must be absolute
+``spectune.*`` paths — relative imports would fail with
+"attempted relative import with no known parent package".
 
 Hard ``verl`` imports are never required here — only Spectune scoring logic.
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping, Sequence
 from dataclasses import fields
 from typing import Any
 
+from spectune.reward.config import RewardConfig
+from spectune.reward.evaluator import RewardEvaluator
 from spectune.tools.catalog import DEFAULT_RL_TOOL_NAMES, schemas_for_names
-
-from .config import RewardConfig
-from .evaluator import RewardEvaluator
 
 _CONFIG_FIELDS = {field.name for field in fields(RewardConfig)}
 
@@ -67,8 +72,12 @@ def compute_score(
     extra_info: Mapping[str, Any] | None = None,
     data_source: Any = None,
     **kwargs: Any,
-) -> float:
-    """Compute one scalar score using the signature expected by verl.
+) -> dict[str, float]:
+    """Compute reward and per-component scores using the signature expected by verl.
+
+    Returns a dict with ``score`` (total weighted reward) plus individual
+    component keys (``gt_smiles``, ``tool_call_format``, ``smiles_validity``,
+    ``tool_call_count``) so verl logs them as separate TensorBoard curves.
 
     Reward settings can be passed as keyword arguments or under
     ``extra_info["reward_config"]``. If ``extra_info["rollout_messages"]`` is
@@ -78,6 +87,20 @@ def compute_score(
     """
     del data_source  # Provided by verl reward managers; unused by Spectune scoring.
     extra_info = extra_info if isinstance(extra_info, Mapping) else {}
+
+    if os.getenv("VERL_DEBUG"):
+        print(f"\n[DEBUG] === compute_score entry ===")
+        print(f"[DEBUG] ground_truth = {ground_truth!r}")
+        rollout_msgs = extra_info.get("rollout_messages")
+        if rollout_msgs:
+            print(f"[DEBUG] rollout_messages ({len(rollout_msgs)} turns):")
+            for i, m in enumerate(rollout_msgs):
+                role = m.get("role", "?") if isinstance(m, Mapping) else "?"
+                content = str(m.get("content", ""))[:200] if isinstance(m, Mapping) else str(m)[:200]
+                print(f"[DEBUG]   [{i}] {role}: {content!r}")
+        else:
+            print(f"[DEBUG] solution_str = {solution_str[:500]!r}")
+        breakpoint()
     config_values: dict[str, Any] = {}
     nested_config = extra_info.get("reward_config")
     if isinstance(nested_config, Mapping):
@@ -86,7 +109,8 @@ def compute_score(
 
     tool_schemas = _resolve_tool_schemas(extra_info)
     evaluator = RewardEvaluator(RewardConfig(**config_values), tool_schemas=tool_schemas)
-    return evaluator.evaluate(_resolve_rollout(solution_str, extra_info), ground_truth).score
+    result = evaluator.evaluate(_resolve_rollout(solution_str, extra_info), ground_truth)
+    return {"score": result.score, **result.components}
 
 
 def compute_score_batched(
@@ -95,7 +119,7 @@ def compute_score_batched(
     *,
     extra_infos: Sequence[Mapping[str, Any] | None] | None = None,
     **kwargs: Any,
-) -> list[float]:
+) -> list[dict[str, float]]:
     """Batch wrapper for verl reward managers that call one Python function."""
     if len(solution_strs) != len(ground_truths):
         raise ValueError("solution_strs and ground_truths must have the same length")

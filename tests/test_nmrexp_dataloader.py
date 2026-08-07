@@ -208,7 +208,10 @@ class TestPreprocessBuildsTruth:
     def test_drop_qc_wrong_can_be_disabled(self, raw_dir, processed_dir):
         _write_checked_csv(
             raw_dir / "test_300_checked.csv",
-            [_checked_row(), _checked_row(nmr_solvent_right="wrong")],
+            [
+                _checked_row(SMILES="CCO", smiles_actual="CCO"),
+                _checked_row(SMILES="CCN", smiles_actual="CCN", nmr_solvent_right="wrong"),
+            ],
         )
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir, drop_qc_wrong=False))
 
@@ -241,7 +244,11 @@ class TestPreprocessBuildsTruth:
         assert summary["dropped_nmr_type"] == 1
 
     def test_max_records_caps_output(self, raw_dir, processed_dir):
-        _write_checked_csv(raw_dir / "test_300_checked.csv", [_checked_row() for _ in range(5)])
+        smiles_list = ["CCO", "CCN", "CCC", "CCCO", "CCCN"]
+        _write_checked_csv(
+            raw_dir / "test_300_checked.csv",
+            [_checked_row(SMILES=s, smiles_actual=s) for s in smiles_list],
+        )
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir, max_records=2))
 
         summary = loader.preprocess()["test"]
@@ -252,7 +259,11 @@ class TestPreprocessBuildsTruth:
     def test_sample_ids_are_stable_across_reprocessing(self, raw_dir, processed_dir):
         _write_checked_csv(
             raw_dir / "test_300_checked.csv",
-            [_checked_row(), _checked_row(nmr_solvent_right="wrong"), _checked_row(SMILES="CCN")],
+            [
+                _checked_row(SMILES="CCO", smiles_actual="CCO"),
+                _checked_row(SMILES="CCO", smiles_actual="CCO", nmr_solvent_right="wrong"),
+                _checked_row(SMILES="CCN", smiles_actual="CCN"),
+            ],
         )
         loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
 
@@ -261,6 +272,7 @@ class TestPreprocessBuildsTruth:
         ids_after = [record["sample_id"] for record in loader.load_truth("test")]
 
         assert ids_before == ids_after
+        # row 1 is dropped (qc_wrong); row 0 and 2 have different gt_smiles → 2 records
         assert ids_before == ["NMRexp:test:checked:0", "NMRexp:test:checked:2"]
 
 
@@ -422,3 +434,96 @@ class TestRealParquetSource:
         assert len(dataset) == 1
         assert dataset[0]["gt_smiles"] == "CCN(CC)CC"
         assert dataset[0]["provenance"]["source_file"] == "NMRexp_10to24_1_1004.parquet"
+
+
+class TestMergeSameSmiles:
+    def test_same_smiles_different_types_merge_into_one_record(self, raw_dir, processed_dir):
+        _write_checked_csv(
+            raw_dir / "test_300_checked.csv",
+            [
+                _checked_row(NMR_type="1H NMR", NMR_shift_text="3.70 (q, 2H), 1.20 (t, 3H)"),
+                _checked_row(NMR_type="13C NMR", NMR_frequency="101 MHz", NMR_shift_text="58.0, 18.6"),
+            ],
+        )
+        loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
+
+        summary = loader.preprocess()["test"]
+        dataset = loader.load_truth("test")
+
+        assert summary["kept"] == 1
+        assert summary["merged_groups"] == 1
+        assert summary["merged_into"] == 1
+        assert len(dataset) == 1
+        record = dataset[0]
+        assert len(record["nmr_list"]) == 2
+        # The first block is kept for backwards compatibility.
+        assert record["nmr"]["type"] == "1H NMR"
+        assert [block["type"] for block in record["nmr_list"]] == ["1H NMR", "13C NMR"]
+        assert record["merged_sample_ids"] == ["NMRexp:test:checked:0", "NMRexp:test:checked:1"]
+
+    def test_merge_keeps_distinct_smiles_as_separate_records(self, raw_dir, processed_dir):
+        _write_checked_csv(
+            raw_dir / "test_300_checked.csv",
+            [
+                _checked_row(SMILES="CCO", smiles_actual="CCO"),
+                _checked_row(SMILES="CCN", smiles_actual="CCN"),
+            ],
+        )
+        loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
+
+        dataset = loader.load_truth("test")
+
+        assert len(dataset) == 2
+        assert [record["nmr_list"][0]["type"] for record in dataset] == ["1H NMR", "1H NMR"]
+
+    def test_every_record_exposes_nmr_list(self, raw_dir, processed_dir):
+        _write_checked_csv(raw_dir / "test_300_checked.csv", [_checked_row()])
+        loader = NmrExpDataLoader(_config(raw_dir, processed_dir))
+
+        dataset = loader.load_truth("test")
+
+        assert len(dataset) == 1
+        assert "nmr_list" in dataset[0]
+        assert len(dataset[0]["nmr_list"]) == 1
+        assert dataset[0]["nmr_list"][0]["type"] == "1H NMR"
+
+    def test_merge_applies_max_records_to_merged_output(self, raw_dir, processed_dir):
+        smiles_list = ["CCO", "CCN", "CCC", "CCCO"]
+        _write_checked_csv(
+            raw_dir / "test_300_checked.csv",
+            [_checked_row(SMILES=s, smiles_actual=s) for s in smiles_list],
+        )
+        loader = NmrExpDataLoader(_config(raw_dir, processed_dir, max_records=2))
+
+        summary = loader.preprocess()["test"]
+
+        assert summary["kept"] == 2
+        assert len(loader.load_truth("test")) == 2
+
+    def test_merge_tracks_stats_across_sources(self, raw_dir, processed_dir):
+        _write_checked_csv(
+            raw_dir / "test_300_checked.csv",
+            [
+                _checked_row(SMILES="CCO", smiles_actual="CCO"),
+                _checked_row(SMILES="CCN", smiles_actual="CCN"),
+            ],
+        )
+        _write_raw_csv(
+            raw_dir / "raw.csv",
+            [_base_row(SMILES="CCO"), _base_row(SMILES="CCO"), _base_row(SMILES="CCC")],
+        )
+        config = _config(
+            raw_dir,
+            processed_dir,
+            sources={"checked": "test_300_checked.csv", "raw": "raw.csv"},
+            truth_splits={"test": ("checked", "raw")},
+        )
+        loader = NmrExpDataLoader(config)
+
+        summaries = loader.preprocess()
+
+        # checked: CCO + CCN; raw: CCO, CCO, CCC. Cross-source merge on the
+        # shared gt_smiles CCO (3 rows -> 1), leaving CCN and CCC untouched.
+        assert summaries["test"]["kept"] == 3
+        assert summaries["test"]["merged_groups"] == 1
+        assert summaries["test"]["merged_into"] == 2

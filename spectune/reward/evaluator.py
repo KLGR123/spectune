@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import is_dataclass
@@ -121,6 +122,17 @@ class RewardEvaluator:
             warnings.append("rdkit is unavailable; SMILES were compared as opaque strings and validity was not checked")
         if not gt_smiles:
             warnings.append("ground truth does not contain a non-empty SMILES")
+
+        if os.getenv("VERL_DEBUG"):
+            print(f"\n[DEBUG] === reward calculation ===")
+            print(f"[DEBUG] ground_truth_smiles = {gt_smiles!r}, gt_rank = {gt_rank}")
+            print(f"[DEBUG] answer_candidates = {raw_candidates}")
+            print(f"[DEBUG] valid_candidates = {valid_candidates}")
+            print(f"[DEBUG] invalid_tool_calls = {invalid_call_errors}")
+            print(f"[DEBUG] components = {components}")
+            print(f"[DEBUG] weighted_components = {weighted_components}")
+            print(f"[DEBUG] total_score = {sum(weighted_components.values()):.4f}")
+            breakpoint()
 
         return RewardResult(
             score=float(sum(weighted_components.values())),

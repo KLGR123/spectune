@@ -10,12 +10,21 @@ import csv
 import functools
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .base import JsonDict, Tool, ToolResult
 from .config import ReactionLocalIndexSearchConfig
 from .utils import as_list, has_rdkit, molecular_formula, strict_canonical_smiles
+
+
+@dataclass(frozen=True)
+class IndexedReactionData:
+    """Records with inverted index for fast candidate retrieval."""
+    records: tuple[JsonDict, ...]
+    # inverted index: reactant_component -> list of record indices
+    component_to_records: dict[str, list[int]]
 
 _REACTION_SMILES_RE = re.compile(r"([^\s]+>>[^\s]+)")
 
@@ -137,7 +146,7 @@ class ReactionLocalIndexSearchTool(Tool):
                 warnings=[*warnings, "no valid reactant/reagent SMILES provided"],
             )
 
-        records: list[JsonDict] = []
+        indexed_datasets: list[IndexedReactionData] = []
         sources_used: list[str] = []
         source_errors: list[str] = []
         for source_name, path in available:
@@ -152,10 +161,10 @@ class ReactionLocalIndexSearchTool(Tool):
                 source_errors.append(f"{source_name}: {type(exc).__name__}: {exc}")
                 continue
             if loaded:
-                records.extend(loaded)
+                indexed_datasets.append(loaded)
                 sources_used.append(source_name)
 
-        if not records:
+        if not indexed_datasets:
             return ToolResult(
                 completion="success" if not source_errors else "partial",
                 status="no_candidates",
@@ -165,14 +174,28 @@ class ReactionLocalIndexSearchTool(Tool):
 
         query_set = set(query_components)
         best_by_product: dict[str, JsonDict] = {}
-        for record in records:
-            candidate = _score_record(record, query_set, constraints=constraints, target_formula=target_formula)
-            if candidate is None:
-                continue
-            product = candidate["canonical_smiles"]
-            previous = best_by_product.get(product)
-            if previous is None or candidate["score"] > previous["score"]:
-                best_by_product[product] = candidate
+        total_records = 0
+
+        # Use inverted index to find candidate records efficiently
+        for dataset in indexed_datasets:
+            total_records += len(dataset.records)
+            candidate_indices: set[int] = set()
+
+            # Gather all record indices that match any query component
+            for component in query_components:
+                if component in dataset.component_to_records:
+                    candidate_indices.update(dataset.component_to_records[component])
+
+            # Only score candidate records that have at least one matching component
+            for idx in candidate_indices:
+                record = dataset.records[idx]
+                candidate = _score_record(record, query_set, constraints=constraints, target_formula=target_formula)
+                if candidate is None:
+                    continue
+                product = candidate["canonical_smiles"]
+                previous = best_by_product.get(product)
+                if previous is None or candidate["score"] > previous["score"]:
+                    best_by_product[product] = candidate
 
         ranked = sorted(
             best_by_product.values(),
@@ -190,7 +213,7 @@ class ReactionLocalIndexSearchTool(Tool):
                 "provenance": {
                     "sources_configured": [s for s, _ in available],
                     "sources_loaded": sources_used,
-                    "num_records_scanned": len(records),
+                    "num_records_indexed": total_records,
                     "canonical_query_components": query_components,
                 },
             },
@@ -255,12 +278,20 @@ def _record(
     return record
 
 
+def _build_index(records: list[JsonDict]) -> IndexedReactionData:
+    component_to_records: dict[str, list[int]] = {}
+    for i, record in enumerate(records):
+        for component in record.get("reactant_components") or []:
+            component_to_records.setdefault(component, []).append(i)
+    return IndexedReactionData(records=tuple(records), component_to_records=component_to_records)
+
+
 @functools.lru_cache(maxsize=8)
-def _load_uspto_csv(path: str) -> tuple[JsonDict, ...]:
+def _load_uspto_csv(path: str) -> IndexedReactionData:
     """Load the ChemLLMBench-style USPTO CSV (columns: reactant, product)."""
     csv_path = Path(path)
     if not csv_path.exists():
-        return ()
+        return IndexedReactionData(records=(), component_to_records={})
     records: list[JsonDict] = []
     with csv_path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
@@ -273,15 +304,15 @@ def _load_uspto_csv(path: str) -> tuple[JsonDict, ...]:
             )
             if record is not None:
                 records.append(record)
-    return tuple(records)
+    return _build_index(records)
 
 
 @functools.lru_cache(maxsize=8)
-def _load_chempile_parquet(path: str, *, max_records: int) -> tuple[JsonDict, ...]:
+def _load_chempile_parquet(path: str, *, max_records: int) -> IndexedReactionData:
     """Load ChemPile-lift USPTO rows by extracting embedded 'reactants>>products' text."""
     parquet_path = Path(path)
     if not parquet_path.exists():
-        return ()
+        return IndexedReactionData(records=(), component_to_records={})
     try:
         import pandas as pd
     except ImportError as exc:
@@ -311,15 +342,15 @@ def _load_chempile_parquet(path: str, *, max_records: int) -> tuple[JsonDict, ..
         )
         if record is not None:
             records.append(record)
-    return tuple(records)
+    return _build_index(records)
 
 
 @functools.lru_cache(maxsize=8)
-def _load_pistachio_smi(path: str, *, max_records: int) -> tuple[JsonDict, ...]:
+def _load_pistachio_smi(path: str, *, max_records: int) -> IndexedReactionData:
     """Load a bounded prefix of a Pistachio-style tab-separated reaction SMILES file."""
     smi_path = Path(path)
     if not smi_path.exists():
-        return ()
+        return IndexedReactionData(records=(), component_to_records={})
     records: list[JsonDict] = []
     with smi_path.open(encoding="utf-8", errors="replace") as handle:
         for row_id, line in enumerate(handle):
@@ -347,7 +378,7 @@ def _load_pistachio_smi(path: str, *, max_records: int) -> tuple[JsonDict, ...]:
             )
             if record is not None:
                 records.append(record)
-    return tuple(records)
+    return _build_index(records)
 
 
 def _constraint_evidence(smiles: str, constraints: Sequence[str], target_formula: str) -> JsonDict:

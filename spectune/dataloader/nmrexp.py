@@ -36,7 +36,6 @@ from .config import NmrExpDataLoaderConfig
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing import IO
 
     import pandas as pd
 
@@ -157,35 +156,43 @@ class NmrExpDataLoader:
                 "dropped_nmr_type": 0,
                 "dropped_quality": 0,
                 "dropped_qc_wrong": 0,
+                "merged_groups": 0,
+                "merged_into": 0,
             }
             per_source: JsonDict = {}
-            with tmp_path.open("w", encoding="utf-8") as handle:
-                for source_key in source_keys:
-                    if config.max_records and totals["kept"] >= config.max_records:
-                        break
-                    record_limit = config.max_records - totals["kept"] if config.max_records else 0
-                    source_name = config.sources[source_key]
-                    source_path = raw_dir / source_name
-                    if not source_path.exists():
-                        raise FileNotFoundError(
-                            f"NMRexp raw source {source_key!r} for truth split {split!r} not found: {source_path} "
-                            "(set NMREXP_RAW_DIR or pass a NmrExpDataLoaderConfig(raw_dir=...))"
-                        )
-                    frame = _read_raw_table(source_path)
-                    is_checked = _validate_schema(frame, source_path)
-                    stats = _normalize_and_write(
-                        frame,
-                        handle,
-                        truth_split=split,
-                        source_key=source_key,
-                        source_name=source_name,
-                        is_checked=is_checked,
-                        config=config,
-                        record_limit=record_limit,
+            all_records: list[JsonDict] = []
+            for source_key in source_keys:
+                source_name = config.sources[source_key]
+                source_path = raw_dir / source_name
+                if not source_path.exists():
+                    raise FileNotFoundError(
+                        f"NMRexp raw source {source_key!r} for truth split {split!r} not found: {source_path} "
+                        "(set NMREXP_RAW_DIR or pass a NmrExpDataLoaderConfig(raw_dir=...))"
                     )
-                    per_source[source_key] = {"is_checked": is_checked, **stats}
-                    for key, value in stats.items():
-                        totals[key] = totals.get(key, 0) + value
+                frame = _read_raw_table(source_path)
+                is_checked = _validate_schema(frame, source_path)
+                records, stats = _normalize_source(
+                    frame,
+                    truth_split=split,
+                    source_key=source_key,
+                    source_name=source_name,
+                    is_checked=is_checked,
+                    config=config,
+                )
+                per_source[source_key] = {"is_checked": is_checked, **stats}
+                for key, value in stats.items():
+                    totals[key] = totals.get(key, 0) + value
+                all_records.extend(records)
+            merged, merged_groups, merged_into = _merge_same_smiles(all_records)
+            totals["merged_groups"] = merged_groups
+            totals["merged_into"] = merged_into
+            if config.max_records:
+                merged = merged[: config.max_records]
+            totals["kept"] = len(merged)
+            with tmp_path.open("w", encoding="utf-8") as handle:
+                for record in merged:
+                    handle.write(json.dumps(record, ensure_ascii=False))
+                    handle.write("\n")
             tmp_path.replace(out_path)
             summaries[split] = {
                 "status": "built",
@@ -250,17 +257,16 @@ def _validate_schema(frame: pd.DataFrame, source_path: Path) -> bool:
     return bool(present_checked)
 
 
-def _normalize_and_write(
+def _normalize_source(
     frame: pd.DataFrame,
-    handle: IO[str],
     *,
     truth_split: str,
     source_key: str,
     source_name: str,
     is_checked: bool,
     config: NmrExpDataLoaderConfig,
-    record_limit: int = 0,
-) -> JsonDict:
+) -> tuple[list[JsonDict], JsonDict]:
+    """Normalize all rows of one source into a list of records."""
     stats: JsonDict = {
         "source_rows": int(len(frame)),
         "kept": 0,
@@ -268,6 +274,8 @@ def _normalize_and_write(
         "dropped_nmr_type": 0,
         "dropped_quality": 0,
         "dropped_qc_wrong": 0,
+        "merged_groups": 0,
+        "merged_into": 0,
     }
     rows = progress_iter(
         frame.itertuples(index=True),
@@ -275,6 +283,7 @@ def _normalize_and_write(
         label=f"NMRexp/{truth_split}/{source_key}",
         enabled=config.show_progress,
     )
+    records: list[JsonDict] = []
     for row in rows:
         record, drop_reason = _build_record(
             row,
@@ -286,13 +295,38 @@ def _normalize_and_write(
         )
         if record is None:
             stats[f"dropped_{drop_reason}"] += 1
-            continue
-        handle.write(json.dumps(record, ensure_ascii=False))
-        handle.write("\n")
-        stats["kept"] += 1
-        if record_limit and stats["kept"] >= record_limit:
-            break
-    return stats
+        else:
+            records.append(record)
+    stats["kept"] = len(records)
+    return records, stats
+
+
+def _merge_same_smiles(records: list[JsonDict]) -> tuple[list[JsonDict], int, int]:
+    """Group records by ``gt_smiles``, merging each group into a single record.
+
+    The first record of a group keeps its identity fields (``sample_id``,
+    ``provenance``, ``quality``, ...) so existing consumers keep working.
+    ``nmr`` stays the first block for backwards compatibility while
+    ``nmr_list`` carries every block of the group (a single-member group keeps
+    the one block it has, so every output record exposes the same ``nmr_list``
+    shape), and ``merged_sample_ids`` records which source rows were absorbed.
+    Returns ``(merged, num_merged_groups, num_absorbed_rows)``.
+    """
+    groups: dict[str, list[JsonDict]] = {}
+    for record in records:
+        groups.setdefault(record["gt_smiles"], []).append(record)
+    merged: list[JsonDict] = []
+    merged_groups = 0
+    merged_into = 0
+    for group in groups.values():
+        first = group[0]
+        merged_record = {**first, "nmr_list": [record["nmr"] for record in group]}
+        if len(group) > 1:
+            merged_groups += 1
+            merged_into += len(group) - 1
+            merged_record["merged_sample_ids"] = [record["sample_id"] for record in group]
+        merged.append(merged_record)
+    return merged, merged_groups, merged_into
 
 
 def _build_record(

@@ -164,12 +164,15 @@ def test_verl_scalar_and_batch_adapters():
         },
     }
 
-    assert compute_score(format_final_answer(["CCC", "CCO"]), "CCO", extra_info=extra_info) == pytest.approx(0.25)
-    assert compute_score_batched(
+    assert compute_score(format_final_answer(["CCC", "CCO"]), "CCO", extra_info=extra_info)["score"] == pytest.approx(
+        0.25
+    )
+    batched = compute_score_batched(
         [format_final_answer(["CCO"]), format_final_answer(["CCC"])],
         ["CCO", "CCO"],
         extra_infos=[extra_info, extra_info],
-    ) == [pytest.approx(1.0), pytest.approx(0.0)]
+    )
+    assert [result["score"] for result in batched] == [pytest.approx(1.0), pytest.approx(0.0)]
 
 
 def test_verl_adapter_resolves_schemas_from_tool_names():
@@ -193,7 +196,8 @@ def test_verl_adapter_resolves_schemas_from_tool_names():
             },
         },
     )
-    assert score == pytest.approx(1.0)
+    assert score["score"] == pytest.approx(1.0)
+    assert score["gt_smiles"] == pytest.approx(1.0)
 
 
 def test_reward_ignores_tool_result_smiles_in_decoded_rollout():

@@ -16,8 +16,6 @@ from .dataloader import (
     JsonlDataset,
     NmrExpDataLoader,
     NmrExpDataLoaderConfig,
-    SpecXMasterDataLoader,
-    SpecXMasterDataLoaderConfig,
     Subset,
 )
 from .format.v1 import (
@@ -101,8 +99,6 @@ __all__ = [
     "SYSTEM_PROMPT",
     "SemanticScholarSearchConfig",
     "SemanticScholarSearchTool",
-    "SpecXMasterDataLoader",
-    "SpecXMasterDataLoaderConfig",
     "Subset",
     "Tool",
     "ToolManager",

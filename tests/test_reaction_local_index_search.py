@@ -31,7 +31,8 @@ def test_reports_unavailable_without_rdkit(monkeypatch):
 
 
 def test_reports_unavailable_without_any_configured_source():
-    tool = ReactionLocalIndexSearchTool(ReactionLocalIndexSearchConfig())
+    config = ReactionLocalIndexSearchConfig(uspto_csv_path="", chempile_parquet_path="", pistachio_smi_path="")
+    tool = ReactionLocalIndexSearchTool(config)
 
     result = asyncio.run(tool.execute({"reactants": ["CCO"]}))
 
@@ -88,7 +89,11 @@ def test_target_formula_filters_low_scoring_mismatches(uspto_csv):
 
 def test_no_records_when_csv_missing(tmp_path):
     missing = tmp_path / "does_not_exist.csv"
-    config = ReactionLocalIndexSearchConfig(uspto_csv_path=str(missing))
+    config = ReactionLocalIndexSearchConfig(
+        uspto_csv_path=str(missing),
+        chempile_parquet_path="",
+        pistachio_smi_path="",
+    )
     tool = ReactionLocalIndexSearchTool(config)
 
     result = asyncio.run(tool.execute({"reactants": ["CCO"]}))

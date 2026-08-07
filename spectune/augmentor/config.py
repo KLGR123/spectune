@@ -179,6 +179,10 @@ class AugmentorConfig:
     nmr_noise_strength: float = 0.3
     formula_noise_ratio: float = 0.0
     reaction_noise_ratio: float = 0.0 # TODO
+    # Share of multi-modality rows (rows whose record carries more than one NMR
+    # spectrum, e.g. merged 1H/13C entries) that randomly drop some modalities
+    # before the query is built. At least one spectrum is always kept.
+    modal_drop_ratio: float = 0.5
 
     llm: LlmConfig = field(default_factory=LlmConfig)
     enrichment: EnrichmentConfig = field(default_factory=EnrichmentConfig)
@@ -200,6 +204,7 @@ class AugmentorConfig:
             "raw_query_ratio",
             "nmr_noise_ratio",
             "formula_noise_ratio",
+            "modal_drop_ratio",
         ):
             value = getattr(self, name)
             if not 0.0 <= value <= 1.0:

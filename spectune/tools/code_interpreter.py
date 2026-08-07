@@ -34,6 +34,18 @@ def _wrap_python_code(code: str) -> str:
     )
 
 
+def _strip_markdown_fence(code: str) -> str:
+    """Remove an enclosing markdown code fence (`````lang ... `````) if present."""
+    stripped = code.lstrip()
+    if not stripped.startswith("```"):
+        return code
+    lines = stripped.rstrip().splitlines()
+    body = lines[1:] if lines else []
+    if body and body[-1].strip() == "```":
+        body = body[:-1]
+    return "\n".join(body)
+
+
 class CodeInterpreterTool(Tool):
     name = "code_interpreter"
     description = (
@@ -66,6 +78,7 @@ class CodeInterpreterTool(Tool):
         language = str(arguments.get("language") or self.config.language)
         stdin = str(arguments.get("stdin") or "")
         if language in {"python", "python3"}:
+            code = _strip_markdown_fence(code)
             code = _wrap_python_code(code)
 
         if self.config.backend == "local":

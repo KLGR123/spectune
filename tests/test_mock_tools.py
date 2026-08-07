@@ -74,6 +74,15 @@ def test_local_code_execution_returns_structured_result():
     assert result.data["result_json"] == {"answer": 42}
 
 
+def test_local_code_execution_strips_markdown_fence():
+    tool = CodeInterpreterTool(CodeInterpreterConfig(backend="local", allow_local_execution=True))
+
+    result = asyncio.run(tool.execute({"code": "```python\nprint('fenced')\n```"}))
+
+    assert result.completion == "success"
+    assert result.data["stdout"] == "fenced\n"
+
+
 def test_code_execution_limits_numeric_library_threads():
     tool = CodeInterpreterTool(CodeInterpreterConfig(backend="local", allow_local_execution=True))
     original_openblas_threads = os.environ.get("OPENBLAS_NUM_THREADS")

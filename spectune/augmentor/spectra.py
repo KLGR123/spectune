@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import random
 import re
+from collections.abc import Sequence
 from typing import Any
 
 JsonDict = dict[str, Any]
@@ -144,6 +145,83 @@ def apply_nmr_noise(
     return text, {"mode": mode, "applied": True, "strength": strength, **detail}
 
 
+# Maps NMR type keywords to Chinese labels used in the "labelled phrasing" rendering mode.
+# Matched case-insensitively against the nmr["type"] field.
+_NMR_TYPE_ZH: tuple[tuple[str, str], ...] = (
+    ("1H",  "氢谱"),
+    ("13C", "碳谱"),
+    ("19F", "氟谱"),
+    ("31P", "磷谱"),
+    ("11B", "硼谱"),
+    ("29Si","硅谱"),
+    ("15N", "氮谱"),
+    ("DEPT","DEPT谱"),
+    ("COSY","COSY谱"),
+    ("HSQC","HSQC谱"),
+    ("HMBC","HMBC谱"),
+    ("NOESY","NOESY谱"),
+)
+
+# Phrasing patterns for the Chinese-label rendering path.
+# {label} → the Chinese label string, {data} → the spectrum text line.
+_MULTIMODAL_LABEL_TEMPLATES: tuple[str, ...] = (
+    "{label}是{data}",
+    "{label}数据：{data}",
+    "{label}如下：{data}",
+    "{label}为{data}",
+)
+_MULTIMODAL_CONNECTORS: tuple[str, ...] = (
+    "、",
+    "；",
+    "\n",
+)
+
+
+def _nmr_type_zh(nmr_type: str) -> str:
+    """Return a Chinese label for ``nmr_type``, or the original string if unrecognised."""
+    upper = nmr_type.upper()
+    for keyword, label in _NMR_TYPE_ZH:
+        if keyword.upper() in upper:
+            return label
+    return nmr_type
+
+
+def build_multimodal_spectrum_text(
+    nmr_list: Sequence[JsonDict | None],
+    rng: random.Random | None = None,
+) -> str:
+    """Render multiple NMR blocks into one text block.
+
+    When ``rng`` is supplied, randomly picks between two presentation styles:
+
+    - **plain** (≈50 %): one spectrum per line, same as before.
+    - **labelled** (≈50 %): Chinese-label phrasing such as
+      "氢谱是1H NMR (400 MHz, CDCl3): …、碳谱是13C NMR (101 MHz, CDCl3): …"
+      using a randomly chosen connector (、/；/newline) and sentence template.
+
+    When ``rng`` is None the function always uses the plain style, keeping the
+    behaviour of callers that do not participate in query construction (tests,
+    ``nmr_text_clean`` etc.).
+
+    Empty blocks (no shift_text) are silently skipped.
+    """
+    lines = [build_spectrum_text(nmr) for nmr in nmr_list]
+    lines = [line for line in lines if line]
+    if not lines:
+        return ""
+    if len(lines) == 1 or rng is None or rng.random() < 0.5:
+        return "\n".join(lines)
+    # Labelled phrasing: pair each line with its Chinese NMR-type label.
+    template = rng.choice(_MULTIMODAL_LABEL_TEMPLATES)
+    connector = rng.choice(_MULTIMODAL_CONNECTORS)
+    parts: list[str] = []
+    for nmr, line in zip(nmr_list, lines):
+        nmr_type = str((nmr or {}).get("type") or "").strip()
+        label = _nmr_type_zh(nmr_type) if nmr_type else "谱图"
+        parts.append(template.format(label=label, data=line))
+    return connector.join(parts)
+
+
 def apply_reaction_noise(reaction: JsonDict, _rng: random.Random, _strength: float = 0.0) -> tuple[JsonDict, JsonDict]:
     """Reserved: corrupt reaction context the way :func:`apply_nmr_noise` corrupts spectra.
 
@@ -156,4 +234,10 @@ def apply_reaction_noise(reaction: JsonDict, _rng: random.Random, _strength: flo
     return reaction, {"mode": None, "applied": False}
 
 
-__all__ = ["apply_nmr_noise", "apply_reaction_noise", "build_spectrum_text", "split_peaks"]
+__all__ = [
+    "apply_nmr_noise",
+    "apply_reaction_noise",
+    "build_multimodal_spectrum_text",
+    "build_spectrum_text",
+    "split_peaks",
+]

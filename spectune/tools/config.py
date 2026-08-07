@@ -80,14 +80,9 @@ class NmrRerankConfig:
 
 @dataclass(frozen=True, slots=True)
 class NmrForwardPredictConfig:
-    """Settings for the ``nmr_forward_predict`` MCP backend.
+    """Settings for the ``nmr_forward_predict`` HTTP JSON backend."""
 
-    The backend is an MCP tool (not a plain HTTP endpoint), so it is reached
-    through an MCP client rather than raw HTTP.
-    """
-
-    mcp_url: str = field(default_factory=lambda: os.getenv("NMR_PREDICT_MCP_URL", ""))
-    mcp_tool_name: str = field(default_factory=lambda: os.getenv("NMR_PREDICT_MCP_TOOL_NAME", "NMR_predict"))
+    api_url: str = field(default_factory=lambda: os.getenv("NMR_PREDICT_API_URL", ""))
     timeout_s: float = 90.0
 
 

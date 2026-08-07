@@ -27,16 +27,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="data_source field written into each row",
     )
     compile_parser.add_argument(
-        "--tool-name",
-        action="append",
-        default=[],
-        dest="tool_names",
-        help="Tool name to expose via extra_info.tools_kwargs (repeatable)",
-    )
-    compile_parser.add_argument(
-        "--all-tools",
-        action="store_true",
-        help=f"Use the default RL tool set: {', '.join(DEFAULT_RL_TOOL_NAMES)}",
+        "--tools",
+        default=None,
+        help=(
+            "Comma-separated tool names to expose via extra_info.tools_kwargs. "
+            f"Defaults to the standard RL set: {', '.join(DEFAULT_RL_TOOL_NAMES)}"
+        ),
     )
     compile_parser.add_argument(
         "--reward-config-json",
@@ -68,9 +64,10 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--reward-config-json must decode to an object")
         reward_config = loaded
 
-    if args.all_tools and args.tool_names:
-        raise SystemExit("use either --all-tools or repeated --tool-name, not both")
-    tool_names = tuple(DEFAULT_RL_TOOL_NAMES) if args.all_tools else tuple(args.tool_names)
+    if args.tools is not None:
+        tool_names = tuple(name.strip() for name in args.tools.split(",") if name.strip())
+    else:
+        tool_names = tuple(DEFAULT_RL_TOOL_NAMES)
 
     config = ArtifactCompileConfig(
         data_source=args.data_source,
