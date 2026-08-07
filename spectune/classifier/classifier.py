@@ -1,14 +1,14 @@
-"""Chemistry- and language-aware clustering for dataloader outputs."""
+"""Chemistry-aware clustering for NMRexp dataloader outputs."""
 
 from __future__ import annotations
 
 import json
 import tempfile
-from collections import defaultdict, deque
+from collections import deque
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from spectune.dataloader import Dataset, JsonlDataset
 from spectune.dataloader.base import JsonDict, progress_iter
@@ -115,23 +115,18 @@ def _bounded_process_results(
 
 
 class Classifier:
-    """Append meaningful cluster labels to NMRexp truth or SpecXMaster queries.
+    """Append meaningful cluster labels to NMRexp truth records.
 
-    Input kind is inferred from the record schema: ``gt_smiles`` selects the
-    chemistry pipeline and ``query`` selects the conversation pipeline. The
-    source must be a :class:`JsonlDataset`, which is what both bundled loaders
-    return; its JSONL file is rewritten atomically with a ``cluster`` field and
-    a freshly indexed :class:`JsonlDataset` is returned.
+    The source must be a :class:`JsonlDataset` returned by
+    :class:`~spectune.dataloader.nmrexp.NmrExpDataLoader`; its JSONL file is
+    rewritten atomically with a ``cluster`` field and a freshly indexed
+    :class:`JsonlDataset` is returned.
 
     NMR clustering combines L2-normalized Morgan fingerprints (topological
     structure) with a separately standardized block of interpretable molecular
     properties. This deliberately excludes IDs, filenames, formula strings,
     and other provenance that would produce spurious clusters. MiniBatchKMeans
     keeps the method practical for multi-million-row truth files.
-
-    SpecXMaster turns are grouped by ``conversation_id``, ordered by
-    ``turn_index``, joined with an explicit separator, and encoded as one
-    conversation. Every turn in that conversation receives the same label.
     """
 
     def __init__(self, config: ClassifierConfig | None = None) -> None:
@@ -151,14 +146,13 @@ class Classifier:
         if len(dataset) == 0:
             raise ValueError("cannot cluster an empty dataset")
 
-        kind = self._infer_kind(dataset[0])
+        self._infer_kind(dataset[0])
         should_visualize = self.config.visualize if visualize is None else visualize
         output_dir = Path(self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="spectune_classifier_", dir=output_dir) as temporary_dir:
-            result = self._classify_kind(
+            result = self._classify_nmr(
                 dataset,
-                kind,
                 Path(temporary_dir),
                 visualize=should_visualize,
                 visualization_path=visualization_path,
@@ -184,64 +178,32 @@ class Classifier:
         if not _all_records_clustered(dataset, self.config.cluster_key):
             raise ValueError("dataset has no complete cluster assignment; call classify() first")
 
-        kind = self._infer_kind(dataset[0])
-        if kind == "nmr":
-            sampled = list(
-                dataset.sample(
-                    self.config.visualization_max_points,
-                    seed=self.config.random_state,
-                    cluster_key=self.config.cluster_key,
-                )
+        self._infer_kind(dataset[0])
+        sampled = list(
+            dataset.sample(
+                self.config.visualization_max_points,
+                seed=self.config.random_state,
+                cluster_key=self.config.cluster_key,
             )
-            features, records = self._nmr_visual_features(sampled)
-            labels = [int(record[self.config.cluster_key]) for record in records]
-            representatives = _record_representatives(records, features, labels, "gt_smiles")
-        else:
-            records = list(dataset)
-            _, texts, row_groups = self._conversation_texts(records)
-            features = self._encode_texts(texts)
-            labels = [int(records[row_indices[0]][self.config.cluster_key]) for row_indices in row_groups]
-            representatives = _text_representatives(features, labels, texts)
+        )
+        features, records = self._nmr_visual_features(sampled)
+        labels = [int(record[self.config.cluster_key]) for record in records]
+        representatives = _record_representatives(records, features, labels, "gt_smiles")
         return plot_clusters(
             features,
             labels,
             representatives,
             output_path,
-            kind=kind,
+            kind="nmr",
             dpi=self.config.visualization_dpi,
             random_state=self.config.random_state,
             dim=self.config.visualization_dim,
         )
 
-    def _classify_kind(
-        self,
-        dataset: JsonlDataset,
-        kind: Literal["nmr", "queries"],
-        work_dir: Path,
-        *,
-        visualize: bool,
-        visualization_path: str | Path | None,
-    ) -> JsonlDataset:
-        if kind == "nmr":
-            return self._classify_nmr(
-                dataset,
-                work_dir,
-                visualize=visualize,
-                visualization_path=visualization_path,
-            )
-        return self._classify_queries(
-            dataset,
-            visualize=visualize,
-            visualization_path=visualization_path,
-        )
-
     @staticmethod
-    def _infer_kind(record: JsonDict) -> Literal["nmr", "queries"]:
-        if record.get("gt_smiles"):
-            return "nmr"
-        if "query" in record:
-            return "queries"
-        raise ValueError("unsupported record schema: expected NMRexp 'gt_smiles' or SpecXMaster 'query'")
+    def _infer_kind(record: JsonDict) -> None:
+        if not record.get("gt_smiles"):
+            raise ValueError("unsupported record schema: expected NMRexp 'gt_smiles'")
 
     def _classify_nmr(
         self,
@@ -479,147 +441,6 @@ class Classifier:
         property_features *= self.config.property_weight
         return np.concatenate((structural, property_features), axis=1), valid_records
 
-    def _classify_queries(
-        self,
-        dataset: JsonlDataset,
-        *,
-        visualize: bool,
-        visualization_path: str | Path | None,
-    ) -> JsonlDataset:
-        np, MiniBatchKMeans, _ = _clustering_dependencies()
-        records = list(dataset)
-        conversation_ids, conversation_texts, row_groups = self._conversation_texts(records)
-        embeddings = self._encode_texts(conversation_texts)
-
-        effective_clusters = min(self.config.query_n_clusters, len(conversation_texts))
-        if effective_clusters < 1:
-            raise ValueError("no non-empty SpecXMaster conversations were found")
-        kmeans = MiniBatchKMeans(
-            n_clusters=effective_clusters,
-            random_state=self.config.random_state,
-            batch_size=max(self.config.batch_size, effective_clusters),
-            n_init="auto",
-        )
-        conversation_labels = kmeans.fit_predict(embeddings).astype(np.int32)
-
-        row_labels = np.full(len(records), -1, dtype=np.int32)
-        for group_index, row_indices in enumerate(row_groups):
-            row_labels[row_indices] = conversation_labels[group_index]
-        _rewrite_jsonl_clusters(dataset.path, row_labels, self.config.cluster_key)
-
-        visualization = None
-        if visualize and len(conversation_texts) >= 2:
-            sample_indices = _balanced_indices(
-                conversation_labels,
-                self.config.visualization_max_points,
-                self.config.random_state,
-            )
-            sample_embeddings = embeddings[sample_indices]
-            sample_labels = conversation_labels[sample_indices]
-            representatives = _text_representatives(
-                sample_embeddings,
-                sample_labels,
-                [conversation_texts[index] for index in sample_indices],
-            )
-            visualization = plot_clusters(
-                sample_embeddings,
-                sample_labels,
-                representatives,
-                self._visualization_path(dataset, visualization_path),
-                kind="queries",
-                dpi=self.config.visualization_dpi,
-                random_state=self.config.random_state,
-                dim=self.config.visualization_dim,
-            )
-
-        self.last_summary = {
-            "status": "built",
-            "kind": "queries",
-            "records": len(records),
-            "conversations": len(conversation_ids),
-            "clusters": effective_clusters,
-            "embedding_model": self.config.text_model_name_or_path,
-            "output_path": str(dataset.path),
-            "visualization_path": str(visualization) if visualization else None,
-        }
-        return JsonlDataset(dataset.path)
-
-    def _conversation_texts(
-        self,
-        records: Sequence[JsonDict],
-    ) -> tuple[list[str], list[str], list[list[int]]]:
-        grouped: dict[str, list[tuple[int, int, str]]] = defaultdict(list)
-        for row_index, record in enumerate(records):
-            provenance = record.get("provenance") or {}
-            conversation_id = str(provenance.get("conversation_id") or record.get("sample_id") or row_index)
-            turn_index = int(provenance.get("turn_index") or 0)
-            query = str(record.get("query") or "").strip()
-            if query:
-                grouped[conversation_id].append((turn_index, row_index, query))
-
-        conversation_ids: list[str] = []
-        texts: list[str] = []
-        row_groups: list[list[int]] = []
-        for conversation_id, turns in grouped.items():
-            ordered = sorted(turns)
-            conversation_ids.append(conversation_id)
-            texts.append(self.config.conversation_separator.join(query for _, _, query in ordered))
-            row_groups.append([row_index for _, row_index, _ in ordered])
-        return conversation_ids, texts, row_groups
-
-    def _encode_texts(self, texts: Sequence[str]) -> Any:
-        try:
-            import numpy as np
-            import torch
-            import torch.nn.functional as functional
-            from transformers import AutoModel, AutoTokenizer
-        except ImportError as exc:
-            raise RuntimeError(
-                "query clustering requires torch, transformers, numpy, and scikit-learn; install spectune[classifier]"
-            ) from exc
-
-        model_path = self.config.text_model_name_or_path
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_path,
-            trust_remote_code=self.config.text_trust_remote_code,
-            padding_side="left",
-        )
-        model = AutoModel.from_pretrained(
-            model_path,
-            trust_remote_code=self.config.text_trust_remote_code,
-            torch_dtype="auto",
-        )
-        device = self.config.text_device or ("cuda" if torch.cuda.is_available() else "cpu")
-        model.to(device)
-        model.eval()
-
-        batches: list[Any] = []
-        iterator = range(0, len(texts), self.config.text_batch_size)
-        iterator = progress_iter(
-            iterator,
-            total=(len(texts) + self.config.text_batch_size - 1) // self.config.text_batch_size,
-            label="Classifier/query embeddings",
-            enabled=self.config.show_progress,
-        )
-        with torch.inference_mode():
-            for start in iterator:
-                encoded = tokenizer(
-                    list(texts[start : start + self.config.text_batch_size]),
-                    padding=True,
-                    truncation=True,
-                    max_length=self.config.text_max_length,
-                    return_tensors="pt",
-                )
-                encoded = {key: value.to(device) for key, value in encoded.items()}
-                hidden = model(**encoded).last_hidden_state
-                pooled = _last_token_pool(hidden, encoded["attention_mask"])
-                pooled = functional.normalize(pooled, p=2, dim=1)
-                batches.append(pooled.float().cpu().numpy())
-        del model
-        if device.startswith("cuda"):
-            torch.cuda.empty_cache()
-        return np.concatenate(batches, axis=0).astype(np.float32)
-
     def _visualization_path(
         self,
         dataset: JsonlDataset,
@@ -639,15 +460,6 @@ def _clustering_dependencies() -> tuple[Any, Any, Any]:
         raise RuntimeError("clustering requires numpy and scikit-learn; install spectune[classifier]") from exc
     return np, MiniBatchKMeans, StandardScaler
 
-
-def _last_token_pool(last_hidden_states: Any, attention_mask: Any) -> Any:
-    import torch
-
-    if bool((attention_mask[:, -1].sum() == attention_mask.shape[0]).item()):
-        return last_hidden_states[:, -1]
-    sequence_lengths = attention_mask.sum(dim=1) - 1
-    batch_indices = torch.arange(last_hidden_states.shape[0], device=last_hidden_states.device)
-    return last_hidden_states[batch_indices, sequence_lengths]
 
 
 def _all_records_clustered(dataset: Dataset, cluster_key: str) -> bool:
@@ -706,19 +518,6 @@ def _nmr_representatives(
         representatives[label] = str(record.get("gt_smiles") or "")
     return representatives
 
-
-def _text_representatives(features: Any, labels: Any, texts: Sequence[str]) -> dict[int, str]:
-    import numpy as np
-
-    labels = np.asarray(labels, dtype=np.int32)
-    representatives: dict[int, str] = {}
-    for label in sorted(int(value) for value in np.unique(labels)):
-        positions = np.flatnonzero(labels == label)
-        cluster_features = features[positions]
-        center = cluster_features.mean(axis=0)
-        representative_position = positions[int(np.argmin(np.linalg.norm(cluster_features - center, axis=1)))]
-        representatives[label] = texts[int(representative_position)]
-    return representatives
 
 
 def _record_representatives(

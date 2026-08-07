@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal
 
+
 _DEFAULT_NMREXP_SOURCES: Mapping[str, str] = MappingProxyType(
     {
         "raw": "NMRexp_10to24_1_1004.parquet",
@@ -61,6 +62,11 @@ class NmrExpDataLoaderConfig:
 
     ``show_progress`` prints row-processed/rate/ETA to stderr while
     ``preprocess()`` runs; disable it for quiet/non-interactive runs (e.g. CI).
+
+    Rows sharing the same canonical ``gt_smiles`` are always merged into a
+    single record: ``nmr`` holds the first block (backwards-compatible),
+    ``nmr_list`` carries all blocks for that molecule, and multi-row groups
+    additionally expose ``merged_sample_ids``.
     """
 
     raw_dir: str = field(default_factory=lambda: os.getenv("NMREXP_RAW_DIR", "/root/data/NMRexp"))
@@ -76,29 +82,4 @@ class NmrExpDataLoaderConfig:
     show_progress: bool = True
 
 
-@dataclass(frozen=True, slots=True)
-class SpecXMasterDataLoaderConfig:
-    """Settings for :class:`~spectune.dataloader.specxmaster.SpecXMasterDataLoader`.
-
-    SpecXMaster is raw production traffic (zipped per-conversation exports),
-    not a labeled dataset, so unlike :class:`NmrExpDataLoaderConfig` there is
-    no ``sources``/split mapping: every ``*.zip`` under ``raw_dir`` is read and
-    merged into one ``queries`` pool, cached as a single JSON-Lines file under
-    ``processed_dir``. Queries are meant to be clustered into seed questions
-    downstream, then matched independently against
-    :class:`NmrExpDataLoaderConfig`'s train/test truth splits to build the final
-    train/test datasets.
-
-    ``zip_glob`` selects which archives to read (relative to ``raw_dir``).
-    ``show_progress`` prints per-archive progress to stderr while
-    ``preprocess()`` runs; disable it for quiet/non-interactive runs (e.g. CI).
-    """
-
-    raw_dir: str = field(default_factory=lambda: os.getenv("SPECXMASTER_RAW_DIR", "/fs_mol/liujiarun/data/SpecXMaster"))
-    processed_dir: str = field(default_factory=lambda: os.getenv("SPECTUNE_DATASETS_DIR", "./datasets"))
-    dataset_name: str = "SpecXMaster"
-    zip_glob: str = "*.zip"
-    show_progress: bool = True
-
-
-__all__ = ["NmrExpDataLoaderConfig", "SpecXMasterDataLoaderConfig"]
+__all__ = ["NmrExpDataLoaderConfig"]

@@ -47,7 +47,7 @@ from .prompts import (
     render_structure_block,
 )
 from .reactions import describe_agents
-from .spectra import apply_nmr_noise, build_spectrum_text
+from .spectra import apply_nmr_noise, build_multimodal_spectrum_text, build_spectrum_text
 
 JsonDict = dict[str, Any]
 
@@ -139,6 +139,7 @@ class Augmentor:
             ),
             "formula_noised": sum(1 for record in records if record["augmentation"]["formula_noise_applied"]),
             "multi_turn": sum(1 for record in records if record["num_of_queries"] > 1),
+            "modal_dropped": sum(1 for record in records if record["augmentation"]["modal_drop_applied"]),
             "enrichment": self.enricher.last_summary,
             "llm": dict(self.llm.stats),
             "elapsed_s": round(time.monotonic() - started, 2),
@@ -152,18 +153,45 @@ class Augmentor:
         rng = random.Random(f"{config.seed}:{record.get('sample_id') or index}")
         enrichment = record.get("enrichment") or {}
 
-        clean_text = build_spectrum_text(record.get("nmr"))
+        # A merged record carries every modality in ``nmr_list``; a plain
+        # record's single ``nmr`` block is treated as a one-element list so
+        # both shapes flow through the same multi-modal path below.
+        nmr_list = record.get("nmr_list")
+        if not nmr_list and record.get("nmr"):
+            nmr_list = [record["nmr"]]
+        nmr_list = [nmr for nmr in (nmr_list or []) if nmr]
+
+        # Randomly drop some modalities of multi-spectrum rows, keeping at
+        # least one, so the model also sees partial-evidence queries.
+        dropped_modalities: list[int] = []
+        if len(nmr_list) > 1 and config.modal_drop_ratio and rng.random() < config.modal_drop_ratio:
+            keep_count = rng.randint(1, len(nmr_list) - 1)
+            kept_indices = sorted(rng.sample(range(len(nmr_list)), keep_count))
+            dropped_modalities = [i for i in range(len(nmr_list)) if i not in kept_indices]
+            nmr_list = [nmr_list[i] for i in kept_indices]
+
+        clean_text = build_multimodal_spectrum_text(nmr_list, rng)
         spectrum_text = clean_text
         noise: JsonDict = {"mode": None, "applied": False, "changed": False}
         if spectrum_text and config.nmr_noise_ratio and rng.random() < config.nmr_noise_ratio:
             mode = rng.choice(list(config.nmr_noise_modes))
-            noised_text, noise = apply_nmr_noise(
-                record.get("nmr"),
-                mode,
-                rng,
-                strength=config.nmr_noise_strength,
-            )
-            spectrum_text = noised_text or spectrum_text
+            noised_parts: list[str] = []
+            noise_details: list[JsonDict] = []
+            for nmr in nmr_list:
+                noised_text, detail = apply_nmr_noise(
+                    nmr,
+                    mode,
+                    rng,
+                    strength=config.nmr_noise_strength,
+                )
+                noised_parts.append(noised_text or build_spectrum_text(nmr))
+                noise_details.append(detail)
+            noised_nmr_proxy = [
+                {"shift_text": part, "type": (nmr or {}).get("type")}
+                for nmr, part in zip(nmr_list, noised_parts)
+            ]
+            spectrum_text = build_multimodal_spectrum_text(noised_nmr_proxy, rng)
+            noise = {"mode": mode, "applied": True, "per_spectrum": noise_details}
             # A row can be selected for noising and still come out identical
             # (every peak survived a random drop); analysis wants both facts.
             noise["changed"] = spectrum_text != clean_text
@@ -183,6 +211,8 @@ class Augmentor:
         return {
             "record": record,
             "rng": rng,
+            "nmr_list": nmr_list,
+            "dropped_modalities": dropped_modalities,
             "spectrum_text": spectrum_text,
             "noise": noise,
             "formula_noise": formula_noise,
@@ -379,6 +409,7 @@ class Augmentor:
             turns.append({"turn_index": 1, "role": "user", "content": followup})
 
         llm_status = first_status if followup_status in ("not_applicable", first_status) else "mixed"
+        record_nmr_list = record.get("nmr_list") or ([record.get("nmr")] if record.get("nmr") else None)
         augmentation = {
             "requested_information_type": plan["requested_information_type"],
             "information_type": plan["information_type"],
@@ -397,6 +428,9 @@ class Augmentor:
             "formula_noise_applied": bool(plan["formula_noise"].get("applied")),
             "formula_noise_detail": plan["formula_noise"],
             "reaction_noise_applied": False,
+            "num_active_modalities": len(plan["nmr_list"]),
+            "dropped_modalities": plan["dropped_modalities"],
+            "modal_drop_applied": bool(plan["dropped_modalities"]),
             "has_name_zh": bool(((record.get("enrichment") or {}).get("names") or {}).get("name_zh")),
             "has_name_en": bool(((record.get("enrichment") or {}).get("names") or {}).get("name_en")),
             "has_reaction_precedent": bool(((record.get("enrichment") or {}).get("reaction") or {}).get("precedents")),
@@ -422,9 +456,11 @@ class Augmentor:
             "molecular_formula": record.get("molecular_formula"),
             "molecular_weight": ((record.get("enrichment") or {}).get("properties") or {}).get("molecular_weight"),
             "nmr": record.get("nmr"),
+            "nmr_list": record_nmr_list,
+            "active_nmr_list": plan["nmr_list"],
             "ms": record.get("ms"),
             "nmr_text": plan["spectrum_text"],
-            "nmr_text_clean": build_spectrum_text(record.get("nmr")),
+            "nmr_text_clean": build_multimodal_spectrum_text(plan["nmr_list"]),
             "augmentation": augmentation,
             "enrichment": record.get("enrichment"),
             "provenance": {**(record.get("provenance") or {}), "augmented_from": record.get("sample_id")},

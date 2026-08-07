@@ -8,7 +8,7 @@ from spectune import Augmentor, AugmentorConfig, EnrichmentConfig
 from spectune.augmentor.formulas import perturb_formula
 from spectune.augmentor.spectra import apply_nmr_noise, apply_reaction_noise, build_spectrum_text, split_peaks
 from spectune.llm import LlmClient, LlmConfig
-from tests.mock_servers import run_mock_get_json_server, run_mock_json_server
+from mock_servers import run_mock_get_json_server, run_mock_json_server
 
 _HAS_RDKIT = importlib.util.find_spec("rdkit") is not None
 
@@ -793,3 +793,98 @@ def _fail_on_properties(bound_method):
         return bound_method(properties, fragments)
 
     return guarded
+
+
+_NMR_13C = {
+    "type": "13C NMR",
+    "frequency": "101 MHz",
+    "solvent": "CDCl3",
+    "shift_text": "168.2, 143.1, 128.9",
+    "processed": None,
+}
+
+
+def _multimodal_truth_record(index=0):
+    record = _truth_record(index)
+    record["nmr_list"] = [dict(_NMR), dict(_NMR_13C)]
+    return record
+
+
+@pytest.mark.skipif(not _HAS_RDKIT, reason="rdkit is not installed")
+class TestMultimodalSpectrumText:
+    def test_build_multimodal_spectrum_text_joins_all_blocks(self):
+        from spectune.augmentor.spectra import build_multimodal_spectrum_text
+
+        text = build_multimodal_spectrum_text([_NMR, _NMR_13C])
+
+        assert "1H NMR" in text
+        assert "13C NMR" in text
+        assert text.count("\n") == 1
+
+    def test_build_multimodal_skips_empty_blocks(self):
+        from spectune.augmentor.spectra import build_multimodal_spectrum_text
+
+        text = build_multimodal_spectrum_text([_NMR, {"type": "13C NMR"}, _NMR_13C])
+
+        assert text.count("\n") == 1
+
+    def test_build_multimodal_empty_list_returns_empty_string(self):
+        from spectune.augmentor.spectra import build_multimodal_spectrum_text
+
+        assert build_multimodal_spectrum_text([]) == ""
+
+    def test_multimodal_record_both_spectra_in_query(self, tmp_path):
+        augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, modal_drop_ratio=0.0))
+
+        dataset = augmentor.build([_multimodal_truth_record(i) for i in range(4)])
+
+        for record in dataset:
+            assert "1H NMR" in record["nmr_text"]
+            assert "13C NMR" in record["nmr_text"]
+            assert record["augmentation"]["num_active_modalities"] == 2
+            assert record["augmentation"]["modal_drop_applied"] is False
+            assert record["active_nmr_list"] == record["nmr_list"]
+
+    def test_modal_drop_ratio_one_drops_some_modalities(self, tmp_path):
+        augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, modal_drop_ratio=1.0))
+
+        dataset = augmentor.build([_multimodal_truth_record(i) for i in range(6)])
+
+        for record in dataset:
+            assert record["augmentation"]["modal_drop_applied"] is True
+            assert record["augmentation"]["num_active_modalities"] == 1
+            assert len(record["active_nmr_list"]) == 1
+            # at least one spectrum still in query
+            active_type = record["active_nmr_list"][0]["type"]
+            assert active_type in record["nmr_text"]
+
+    def test_modal_drop_zero_never_drops(self, tmp_path):
+        augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, modal_drop_ratio=0.0))
+
+        dataset = augmentor.build([_multimodal_truth_record(i) for i in range(4)])
+
+        assert all(not record["augmentation"]["modal_drop_applied"] for record in dataset)
+        assert all(record["augmentation"]["num_active_modalities"] == 2 for record in dataset)
+
+    def test_modal_drop_preserves_full_nmr_list_on_record(self, tmp_path):
+        augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, modal_drop_ratio=1.0))
+
+        dataset = augmentor.build([_multimodal_truth_record(0)])
+
+        record = dataset[0]
+        assert len(record["nmr_list"]) == 2
+        assert len(record["active_nmr_list"]) == 1
+
+    def test_modal_drop_on_single_modality_record_is_never_applied(self, tmp_path):
+        augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, modal_drop_ratio=1.0))
+
+        dataset = augmentor.build([_truth_record(i) for i in range(4)])
+
+        assert all(not record["augmentation"]["modal_drop_applied"] for record in dataset)
+
+    def test_modal_dropped_count_in_summary(self, tmp_path):
+        augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, modal_drop_ratio=1.0))
+
+        augmentor.build([_multimodal_truth_record(i) for i in range(4)])
+
+        assert augmentor.last_summary["modal_dropped"] == 4

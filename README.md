@@ -1,7 +1,5 @@
 # spectune
 
-[中文版](README.zh.md)
-
 Train your own spectrum-interpretation agent for NMR and EI-MS through a full pipeline: dataset construction and augmentation, rollout, post-training (SFT and RL), and end-to-end evaluation.
 
 Spectune owns data norms, sample construction, tools, and rewards; external trainers such as [verl](https://github.com/volcengine/verl) are optional adapters (Parquet mapping, rollout, distributed SFT/RL). The core package does not depend on torch, ray, or verl. See [`examples/verl/README.md`](examples/verl/README.md) for agentic tool RL.
@@ -44,12 +42,24 @@ source secrets.env
 
 ```bash
 cd spectune
+source secrets.env
 pytest -v                                   # all tests; real-API tests skip if creds/config absent
 pytest -v tests/test_augmentor.py           # augmentor; rdkit/LLM-dependent tests skip if unavailable
 pytest -v tests/test_external_tools.py      # external calls (requires credentials/config above)
+pytest tests/test_external_tools.py -s -m external
 SPECTUNE_ENABLE_NETWORK_TESTS=1 pytest -v tests/test_external_tools.py  # + credential-free public APIs
 pytest -v tests/test_dataloader_base.py tests/test_nmrexp_dataloader.py tests/test_specxmaster_dataloader.py  # dataloader only; NMRexp tests skip if pandas/pyarrow absent
 pytest -v tests/test_classifier.py           # classifier; optional-dependency tests skip if unavailable
+```
+
+## Training Related
+
+```bash
+tensorboard --logdir /path/to/tb --port 6006 --bind_all
+ssh -L 6006:localhost:6006 user@server
+tmux new -s spectune
+# tmux attach -t spectune
+tail -f /tmp/ray/session_latest/logs/worker-*.out | grep "tool-call\|tool-result" # with export SPECTUNE_TOOL_LOG=1
 ```
 
 

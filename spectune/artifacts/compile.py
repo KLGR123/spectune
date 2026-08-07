@@ -3,6 +3,8 @@
 Artifacts are a **stable handoff format**, not a copy of any trainer's internal
 config. The verl adapter consumes these rows (Parquet / JSONL) and maps them
 onto ``RLHFDataset`` fields; other backends can do the same.
+
+`raw_prompt` is for verl tool_agent.
 """
 
 from __future__ import annotations
@@ -99,6 +101,7 @@ def compile_sample(
         "data_source": config.data_source,
         "agent_name": config.agent_name,
         "prompt": prompt,
+        "raw_prompt": prompt, # for tool_agent
         "ability": config.ability,
         "reward_model": {"style": "rule", "ground_truth": gt_smiles.strip()},
         "extra_info": extra_info,

@@ -82,13 +82,13 @@ compared as opaque strings and invalid-SMILES detection is disabled.
 
 ## verl handoff
 
-For a scalar custom reward, configure verl to import:
+For a scalar custom reward, configure verl with a real file path (stock verl
+does not accept `pkg://` here):
 
 ```text
-pkg://spectune.reward.verl
+custom_reward_function.path=/abs/path/to/spectune/reward/verl.py
+custom_reward_function.name=compute_score
 ```
-
-with `name: compute_score`.
 
 It accepts verl's `data_source`, `solution_str`, `ground_truth`, and `extra_info`
 arguments. Per-sample settings can be supplied as:

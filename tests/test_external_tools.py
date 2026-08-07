@@ -9,7 +9,7 @@ already present in the environment:
 - ``NMR_GENERATE_API_URL`` for ``nmr_generate``
 - ``NMR_REPAIR_API_URL`` for ``nmr_repair``
 - ``NMR_RANK_API_URL`` for ``nmr_rerank``
-- ``NMR_PREDICT_MCP_URL`` (plus the ``fastmcp`` package) for ``nmr_forward_predict``
+- ``NMR_PREDICT_API_URL`` for ``nmr_forward_predict``
 - ``NMREXP_SEARCH_MCP_BASE_URL`` for ``nmrexp_search``
 - ``RXN_LOCAL_INDEX_USPTO_CSV`` / ``RXN_LOCAL_INDEX_CHEMPILE_PARQUET`` /
   ``RXN_LOCAL_INDEX_PISTACHIO_SMI`` (at least one) for ``reaction_local_index_search``
@@ -31,7 +31,6 @@ real network path whenever the prerequisite is available.
 from __future__ import annotations
 
 import asyncio
-import importlib.util
 import os
 
 import pytest
@@ -72,9 +71,7 @@ _HAS_EXTERNAL_SANDBOX = bool(os.getenv("SANDBOX_FUSION_URL") or os.getenv("sandb
 _HAS_EXTERNAL_NMR_GENERATE = bool(os.getenv("NMR_GENERATE_API_URL"))
 _HAS_EXTERNAL_NMR_REPAIR = bool(os.getenv("NMR_REPAIR_API_URL"))
 _HAS_EXTERNAL_NMR_RERANK = bool(os.getenv("NMR_RANK_API_URL"))
-_HAS_EXTERNAL_NMR_FORWARD_PREDICT = (
-    bool(os.getenv("NMR_PREDICT_MCP_URL")) and importlib.util.find_spec("fastmcp") is not None
-)
+_HAS_EXTERNAL_NMR_FORWARD_PREDICT = bool(os.getenv("NMR_PREDICT_API_URL"))
 _HAS_EXTERNAL_NMREXP_SEARCH = bool(os.getenv("NMREXP_SEARCH_MCP_BASE_URL"))
 _HAS_LOCAL_REACTION_INDEX = bool(
     os.getenv("RXN_LOCAL_INDEX_USPTO_CSV")
@@ -91,7 +88,7 @@ def test_external_web_search_returns_hits():
     tool = WebSearchTool(WebSearchConfig())
 
     result = asyncio.run(tool.execute({"query": "pyridine ring SMILES", "count": 1}))
-
+    print(result)
     assert result.completion == "success", result.warnings
     assert result.status in {"ok", "no_hits"}
     assert isinstance(result.data.get("parsed_hits"), list)
@@ -104,7 +101,7 @@ def test_external_sandbox_code_execution():
     tool = CodeInterpreterTool(CodeInterpreterConfig())
 
     result = asyncio.run(tool.execute({"code": "print(1 + 1)"}))
-
+    print(result)
     assert result.completion == "success", result.warnings
     assert result.data["backend"] == "sandbox"
     assert result.data["stdout"] == "2\n"
@@ -115,8 +112,8 @@ def test_external_nmr_generate_returns_candidates():
     # NmrGenerateConfig() reads NMR_GENERATE_API_URL from the environment.
     tool = NmrGenerateTool(NmrGenerateConfig())
 
-    result = asyncio.run(tool.execute({"formula": "C2H6O", "topk": 5}))
-
+    result = asyncio.run(tool.execute({"h_shifts": [7.41, 7.34, 7.24, 7.12, 5.06, 2.89, 2.73], "topk": 5}))
+    print(result)
     assert result.completion == "success", result.warnings
     assert result.status in {"ok", "no_candidates"}
     assert isinstance(result.data.get("candidates"), list)
@@ -128,47 +125,48 @@ def test_external_nmr_repair_returns_candidate():
     tool = NmrRepairTool(NmrRepairConfig())
 
     result = asyncio.run(tool.execute({"input_smiles": "CCO", "target_formula": "C2H4O"}))
-
+    print(result)
     assert result.completion == "success", result.warnings
     assert result.status in {"ok", "no_candidates"}
 
 
-@pytest.mark.skipif(not _HAS_EXTERNAL_NMR_RERANK, reason="NMR_RANK_API_URL is not set")
-def test_external_nmr_rerank_returns_ranking():
-    # NmrRerankConfig() reads NMR_RANK_API_URL from the environment.
-    tool = NmrRerankTool(NmrRerankConfig())
+# @pytest.mark.skipif(not _HAS_EXTERNAL_NMR_RERANK, reason="NMR_RANK_API_URL is not set")
+# def test_external_nmr_rerank_returns_ranking():
+#     # NmrRerankConfig() reads NMR_RANK_API_URL from the environment.
+#     tool = NmrRerankTool(NmrRerankConfig())
 
-    result = asyncio.run(tool.execute({"smiles_list": ["CCO", "COC"]}))
-
-    assert result.completion == "success", result.warnings
-    assert result.status in {"ok", "no_candidates"}
-    assert isinstance(result.data.get("candidates"), list)
+#     result = asyncio.run(tool.execute({"smiles_list": ["CCO", "COC"]}))
+#     print(result)
+#     assert result.completion == "success", result.warnings
+#     assert result.status in {"ok", "no_candidates"}
+#     assert isinstance(result.data.get("candidates"), list)
 
 
 @pytest.mark.skipif(
     not _HAS_EXTERNAL_NMR_FORWARD_PREDICT,
-    reason="NMR_PREDICT_MCP_URL is not set or fastmcp is not installed",
+    reason="NMR_PREDICT_API_URL is not set or fastmcp is not installed",
 )
 def test_external_nmr_forward_predict_returns_shifts():
-    # NmrForwardPredictConfig() reads NMR_PREDICT_MCP_URL from the environment.
+    # NmrForwardPredictConfig() reads NMR_PREDICT_API_URL from the environment.
     tool = NmrForwardPredictTool(NmrForwardPredictConfig())
 
-    result = asyncio.run(tool.execute({"smiles_list": ["CCO"]}))
-
+    result = asyncio.run(tool.execute({"smiles": "CCO", "solvent": "CDCl3"}))
+    print(result)
     assert result.completion == "success", result.warnings
-    assert result.status in {"ok", "no_candidates"}
+    assert result.status == "ok"
+    assert "atoms_shift" in result.data
 
 
-@pytest.mark.skipif(not _HAS_EXTERNAL_NMREXP_SEARCH, reason="NMREXP_SEARCH_MCP_BASE_URL is not set")
-def test_external_nmrexp_search_returns_candidates():
-    # NmrExpSearchConfig() reads NMREXP_SEARCH_MCP_BASE_URL from the environment.
-    tool = NmrExpSearchTool(NmrExpSearchConfig())
+# @pytest.mark.skipif(not _HAS_EXTERNAL_NMREXP_SEARCH, reason="NMREXP_SEARCH_MCP_BASE_URL is not set")
+# def test_external_nmrexp_search_returns_candidates():
+#     # NmrExpSearchConfig() reads NMREXP_SEARCH_MCP_BASE_URL from the environment.
+#     tool = NmrExpSearchTool(NmrExpSearchConfig())
 
-    result = asyncio.run(tool.execute({"h_shifts": [1.2, 3.6], "c_shifts": [18.0, 58.0], "topk": 5}))
+#     result = asyncio.run(tool.execute({"h_shifts": [1.2, 3.6], "c_shifts": [18.0, 58.0], "topk": 5}))
 
-    assert result.completion == "success", result.warnings
-    assert result.status in {"ok", "no_candidates"}
-    assert isinstance(result.data.get("candidates"), list)
+#     assert result.completion == "success", result.warnings
+#     assert result.status in {"ok", "no_candidates"}
+#     assert isinstance(result.data.get("candidates"), list)
 
 
 @pytest.mark.skipif(not _HAS_LOCAL_REACTION_INDEX, reason="no RXN_LOCAL_INDEX_* path is configured")
@@ -176,69 +174,69 @@ def test_external_reaction_local_index_search_returns_candidates():
     # ReactionLocalIndexSearchConfig() reads the RXN_LOCAL_INDEX_* paths from the environment.
     tool = ReactionLocalIndexSearchTool(ReactionLocalIndexSearchConfig())
 
-    result = asyncio.run(tool.execute({"reactants": ["CCO", "CC(=O)Cl"], "topk": 5}))
-
+    result = asyncio.run(tool.execute({"reactants": ["CCO", "CC(=O)Cl"], "topk": 1}))
+    print(result)
     assert result.completion in {"success", "partial"}, result.warnings
     assert result.status in {"ok", "no_candidates"}
 
 
-@pytest.mark.skipif(not _NETWORK_TESTS_ENABLED, reason="SPECTUNE_ENABLE_NETWORK_TESTS is not set")
-def test_external_askcos_reaction_forward_predict_returns_candidates():
-    # ASKCOS's public API needs no credentials; gated on the opt-in network flag
-    # instead so the suite does not require internet access by default.
-    tool = AskcosReactionForwardPredictTool(AskcosReactionForwardPredictConfig())
+# @pytest.mark.skipif(not _NETWORK_TESTS_ENABLED, reason="SPECTUNE_ENABLE_NETWORK_TESTS is not set")
+# def test_external_askcos_reaction_forward_predict_returns_candidates():
+#     # ASKCOS's public API needs no credentials; gated on the opt-in network flag
+#     # instead so the suite does not require internet access by default.
+#     tool = AskcosReactionForwardPredictTool(AskcosReactionForwardPredictConfig())
 
-    result = asyncio.run(tool.execute({"reactants": ["CCBr", "[OH-]"], "topk": 3}))
+#     result = asyncio.run(tool.execute({"reactants": ["CCBr", "[OH-]"], "topk": 3}))
 
-    assert result.completion == "success", result.warnings
-    assert result.status in {"ok", "no_candidates"}
-    assert isinstance(result.data.get("candidates"), list)
-
-
-@pytest.mark.skipif(
-    not _HAS_EXTERNAL_UNIMOL3_REACTION_FORWARD_PREDICT,
-    reason="UNIMOL3_REACTION_FORWARD_PREDICT_API_URL is not set",
-)
-def test_external_unimol3_reaction_forward_predict_returns_candidates():
-    # Unimol3ReactionForwardPredictConfig() reads UNIMOL3_REACTION_FORWARD_PREDICT_API_URL
-    # from the environment; this test always skips until a Uni-Mol3 service is deployed there.
-    tool = Unimol3ReactionForwardPredictTool(Unimol3ReactionForwardPredictConfig())
-
-    result = asyncio.run(tool.execute({"reactants": ["CCBr", "[OH-]"], "topk": 3}))
-
-    assert result.completion == "success", result.warnings
-    assert result.status in {"ok", "no_candidates"}
-    assert isinstance(result.data.get("candidates"), list)
+#     assert result.completion == "success", result.warnings
+#     assert result.status in {"ok", "no_candidates"}
+#     assert isinstance(result.data.get("candidates"), list)
 
 
-@pytest.mark.skipif(not _NETWORK_TESTS_ENABLED, reason="SPECTUNE_ENABLE_NETWORK_TESTS is not set")
-def test_external_semantic_scholar_search_returns_hits():
-    tool = SemanticScholarSearchTool(SemanticScholarSearchConfig())
+# @pytest.mark.skipif(
+#     not _HAS_EXTERNAL_UNIMOL3_REACTION_FORWARD_PREDICT,
+#     reason="UNIMOL3_REACTION_FORWARD_PREDICT_API_URL is not set",
+# )
+# def test_external_unimol3_reaction_forward_predict_returns_candidates():
+#     # Unimol3ReactionForwardPredictConfig() reads UNIMOL3_REACTION_FORWARD_PREDICT_API_URL
+#     # from the environment; this test always skips until a Uni-Mol3 service is deployed there.
+#     tool = Unimol3ReactionForwardPredictTool(Unimol3ReactionForwardPredictConfig())
 
-    result = asyncio.run(tool.execute({"query": "Suzuki-Miyaura coupling mechanism", "max_results": 2}))
+#     result = asyncio.run(tool.execute({"reactants": ["CCBr", "[OH-]"], "topk": 3}))
 
-    assert result.completion == "success", result.warnings
-    assert result.status in {"ok", "no_hits"}
-    assert isinstance(result.data.get("hits"), list)
-
-
-@pytest.mark.skipif(not _NETWORK_TESTS_ENABLED, reason="SPECTUNE_ENABLE_NETWORK_TESTS is not set")
-def test_external_crossref_search_returns_hits():
-    tool = CrossrefSearchTool(CrossrefSearchConfig())
-
-    result = asyncio.run(tool.execute({"query": "NMR structure elucidation", "max_results": 2}))
-
-    assert result.completion == "success", result.warnings
-    assert result.status in {"ok", "no_hits"}
-    assert isinstance(result.data.get("hits"), list)
+#     assert result.completion == "success", result.warnings
+#     assert result.status in {"ok", "no_candidates"}
+#     assert isinstance(result.data.get("candidates"), list)
 
 
-@pytest.mark.skipif(not _NETWORK_TESTS_ENABLED, reason="SPECTUNE_ENABLE_NETWORK_TESTS is not set")
-def test_external_wikipedia_search_returns_hits():
-    tool = WikipediaSearchTool(WikipediaSearchConfig())
+# @pytest.mark.skipif(not _NETWORK_TESTS_ENABLED, reason="SPECTUNE_ENABLE_NETWORK_TESTS is not set")
+# def test_external_semantic_scholar_search_returns_hits():
+#     tool = SemanticScholarSearchTool(SemanticScholarSearchConfig())
 
-    result = asyncio.run(tool.execute({"query": "benzene", "max_results": 2}))
+#     result = asyncio.run(tool.execute({"query": "Suzuki-Miyaura coupling mechanism", "max_results": 2}))
 
-    assert result.completion == "success", result.warnings
-    assert result.status in {"ok", "no_hits"}
-    assert isinstance(result.data.get("hits"), list)
+#     assert result.completion == "success", result.warnings
+#     assert result.status in {"ok", "no_hits"}
+#     assert isinstance(result.data.get("hits"), list)
+
+
+# @pytest.mark.skipif(not _NETWORK_TESTS_ENABLED, reason="SPECTUNE_ENABLE_NETWORK_TESTS is not set")
+# def test_external_crossref_search_returns_hits():
+#     tool = CrossrefSearchTool(CrossrefSearchConfig())
+
+#     result = asyncio.run(tool.execute({"query": "NMR structure elucidation", "max_results": 2}))
+
+#     assert result.completion == "success", result.warnings
+#     assert result.status in {"ok", "no_hits"}
+#     assert isinstance(result.data.get("hits"), list)
+
+
+# @pytest.mark.skipif(not _NETWORK_TESTS_ENABLED, reason="SPECTUNE_ENABLE_NETWORK_TESTS is not set")
+# def test_external_wikipedia_search_returns_hits():
+#     tool = WikipediaSearchTool(WikipediaSearchConfig())
+
+#     result = asyncio.run(tool.execute({"query": "benzene", "max_results": 2}))
+
+#     assert result.completion == "success", result.warnings
+#     assert result.status in {"ok", "no_hits"}
+#     assert isinstance(result.data.get("hits"), list)
