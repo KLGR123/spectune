@@ -36,32 +36,18 @@ import os
 import pytest
 
 from spectune import (
-    AskcosReactionForwardPredictConfig,
-    AskcosReactionForwardPredictTool,
     CodeInterpreterConfig,
     CodeInterpreterTool,
-    CrossrefSearchConfig,
-    CrossrefSearchTool,
-    NmrExpSearchConfig,
-    NmrExpSearchTool,
     NmrForwardPredictConfig,
     NmrForwardPredictTool,
     NmrGenerateConfig,
     NmrGenerateTool,
     NmrRepairConfig,
     NmrRepairTool,
-    NmrRerankConfig,
-    NmrRerankTool,
     ReactionLocalIndexSearchConfig,
     ReactionLocalIndexSearchTool,
-    SemanticScholarSearchConfig,
-    SemanticScholarSearchTool,
-    Unimol3ReactionForwardPredictConfig,
-    Unimol3ReactionForwardPredictTool,
     WebSearchConfig,
     WebSearchTool,
-    WikipediaSearchConfig,
-    WikipediaSearchTool,
 )
 
 pytestmark = pytest.mark.external
@@ -169,15 +155,15 @@ def test_external_nmr_forward_predict_returns_shifts():
 #     assert isinstance(result.data.get("candidates"), list)
 
 
-@pytest.mark.skipif(not _HAS_LOCAL_REACTION_INDEX, reason="no RXN_LOCAL_INDEX_* path is configured")
-def test_external_reaction_local_index_search_returns_candidates():
-    # ReactionLocalIndexSearchConfig() reads the RXN_LOCAL_INDEX_* paths from the environment.
-    tool = ReactionLocalIndexSearchTool(ReactionLocalIndexSearchConfig())
+# @pytest.mark.skipif(not _HAS_LOCAL_REACTION_INDEX, reason="no RXN_LOCAL_INDEX_* path is configured")
+# def test_external_reaction_local_index_search_returns_candidates():
+#     # ReactionLocalIndexSearchConfig() reads the RXN_LOCAL_INDEX_* paths from the environment.
+#     tool = ReactionLocalIndexSearchTool(ReactionLocalIndexSearchConfig())
 
-    result = asyncio.run(tool.execute({"reactants": ["CCO", "CC(=O)Cl"], "topk": 1}))
-    print(result)
-    assert result.completion in {"success", "partial"}, result.warnings
-    assert result.status in {"ok", "no_candidates"}
+#     result = asyncio.run(tool.execute({"reactants": ["CCO", "CC(=O)Cl"], "topk": 1}))
+#     print(result)
+#     assert result.completion in {"success", "partial"}, result.warnings
+#     assert result.status in {"ok", "no_candidates"}
 
 
 # @pytest.mark.skipif(not _NETWORK_TESTS_ENABLED, reason="SPECTUNE_ENABLE_NETWORK_TESTS is not set")

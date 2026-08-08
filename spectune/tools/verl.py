@@ -153,9 +153,7 @@ class PreservedOpenAIToolSchema:
         self.function = _FunctionView(
             name=name.strip(),
             description=str(function.get("description") or ""),
-            parameters=copy.deepcopy(
-                dict(function.get("parameters") or {"type": "object", "properties": {}})
-            ),
+            parameters=copy.deepcopy(dict(function.get("parameters") or {"type": "object", "properties": {}})),
             strict=bool(function.get("strict", False)),
         )
         self._raw = {

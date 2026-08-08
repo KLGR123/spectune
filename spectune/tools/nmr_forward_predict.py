@@ -54,9 +54,7 @@ class NmrForwardPredictTool(Tool):
             payload["solvent"] = solvent
 
         try:
-            result = await asyncio.to_thread(
-                post_json, self.config.api_url, payload, timeout=self.config.timeout_s
-            )
+            result = await asyncio.to_thread(post_json, self.config.api_url, payload, timeout=self.config.timeout_s)
         except Exception as exc:
             return ToolResult(
                 completion="failure",

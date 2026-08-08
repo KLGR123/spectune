@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from spectune.artifacts.compile import ArtifactCompileConfig, compile_jsonl_file
+from spectune.artifacts.compile import ArtifactCompileConfig, compile_jsonl_file, write_interaction_config
 from spectune.format.v1 import FORMAT_SPEC_VERSION
 from spectune.tools.catalog import DEFAULT_RL_TOOL_NAMES
 
@@ -48,6 +48,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--manifest",
         default=None,
         help="Optional path to write a small JSON compile manifest",
+    )
+    compile_parser.add_argument(
+        "--interaction-config",
+        default=None,
+        metavar="PATH",
+        help="If given, write the verl interaction config YAML for ScriptedFollowupInteraction to this path",
     )
     return parser.parse_args(argv)
 
@@ -96,6 +102,11 @@ def main(argv: list[str] | None = None) -> int:
         manifest_path = Path(args.manifest)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    if args.interaction_config:
+        write_interaction_config(args.interaction_config)
+        print(f"wrote interaction config to {args.interaction_config}")
+
     return 0
 
 

@@ -17,7 +17,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 from spectune.tools.catalog import DEFAULT_RL_TOOL_NAMES
@@ -42,17 +41,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write a verl tool_config_path YAML for Spectune tools.",
     )
     wc.add_argument(
-        "--output", required=True, metavar="PATH",
+        "--output",
+        required=True,
+        metavar="PATH",
         help="Destination YAML file (parent dirs are created automatically).",
     )
     wc.add_argument(
-        "--tools", nargs="+", metavar="TOOL",
+        "--tools",
+        nargs="+",
+        metavar="TOOL",
         default=None,
-        help=(
-            "Tool names to include (default: DEFAULT_RL_TOOL_NAMES = "
-            + ", ".join(DEFAULT_RL_TOOL_NAMES)
-            + ")."
-        ),
+        help=("Tool names to include (default: DEFAULT_RL_TOOL_NAMES = " + ", ".join(DEFAULT_RL_TOOL_NAMES) + ")."),
     )
     wc.set_defaults(func=_cmd_write_config)
 

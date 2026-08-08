@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 
 from spectune.dataloader import NmrExpDataLoader
@@ -91,15 +90,22 @@ def _build_info_parser(sub: argparse._SubParsersAction) -> None:  # type: ignore
         help="Print the size of each processed truth split (builds cache if missing).",
     )
     p.add_argument(
-        "--raw-dir", metavar="DIR", default=None,
+        "--raw-dir",
+        metavar="DIR",
+        default=None,
         help="Directory containing raw NMRexp exports.",
     )
     p.add_argument(
-        "--datasets-dir", metavar="DIR", default=None,
+        "--datasets-dir",
+        metavar="DIR",
+        default=None,
         help="Directory for processed JSONL files.",
     )
     p.add_argument(
-        "--splits", nargs="+", metavar="SPLIT", default=None,
+        "--splits",
+        nargs="+",
+        metavar="SPLIT",
+        default=None,
         help="Splits to inspect (default: all).",
     )
 

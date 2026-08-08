@@ -3,12 +3,12 @@ import json
 import random
 
 import pytest
+from mock_servers import run_mock_get_json_server, run_mock_json_server
 
 from spectune import Augmentor, AugmentorConfig, EnrichmentConfig
 from spectune.augmentor.formulas import perturb_formula
 from spectune.augmentor.spectra import apply_nmr_noise, apply_reaction_noise, build_spectrum_text, split_peaks
 from spectune.llm import LlmClient, LlmConfig
-from mock_servers import run_mock_get_json_server, run_mock_json_server
 
 _HAS_RDKIT = importlib.util.find_spec("rdkit") is not None
 
@@ -504,9 +504,7 @@ class TestAugmentorConstruction:
         assert augmentor.last_summary["formula_noised"] == 5
 
     def test_formula_noise_does_not_apply_without_a_formula_condition(self, tmp_path):
-        augmentor = Augmentor(
-            _config(tmp_path, information_mix={"none": 1.0}, formula_noise_ratio=1.0)
-        )
+        augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, formula_noise_ratio=1.0))
 
         dataset = augmentor.build([_truth_record(i) for i in range(3)])
 
@@ -673,7 +671,9 @@ class TestAugmentorConstruction:
         first = Augmentor(_config(tmp_path)).build(records)
         second = Augmentor(_config(tmp_path)).build(records)
 
-        assert [record["turns"][0]["content"] for record in first] == [record["turns"][0]["content"] for record in second]
+        assert [record["turns"][0]["content"] for record in first] == [
+            record["turns"][0]["content"] for record in second
+        ]
 
 
 @pytest.mark.skipif(not _HAS_RDKIT, reason="rdkit is not installed")

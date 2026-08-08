@@ -68,13 +68,17 @@ Key flags:
 
 ## Build augmented dataset
 
+Putting `{name}` (and optionally `{size}`) in `--output` builds the train/test/sft
+sets in a single pass: the truth pool is shuffled once with `--seed`, then carved
+into three non-overlapping slices, so disjointness is guaranteed by construction.
+
 ```bash
 cd /path/to/spectune
 
 python -m spectune.augmentor \
-    --output     outputs/datasets/nmrexp_train_20000.jsonl \
+    --output     outputs/datasets/nmrexp_{name}_{size}.jsonl \
     --split      train \
-    --sample-size 20000 \
+    --sizes      20000 200 2000 \
     --information-mix '{"none":0.24,"formula":0.24,"structure":0.04,"reaction":0.24,"fragment":0.24}' \
     --followup-probability 0.5 \
     --max-fragment-items 3 \
@@ -82,25 +86,40 @@ python -m spectune.augmentor \
     --nmr-noise-ratio 0.0 \
     --formula-noise-ratio 0.0 \
     --modal-drop-ratio 0.5
+```
 
+writes three mutually disjoint files, all drawn from the `train` truth split:
+
+- `outputs/datasets/nmrexp_train_20000.jsonl` — RL train set
+- `outputs/datasets/nmrexp_test_200.jsonl` — held-out eval set
+- `outputs/datasets/nmrexp_sft_2000.jsonl` — SFT set
+
+A plain `--output` without `{name}` keeps the original single-file behavior:
+
+```bash
+python -m spectune.augmentor \
+    --output      outputs/datasets/nmrexp_train_20000.jsonl \
+    --split       train \
+    --sample-size 20000 \
+    --information-mix '{"none":0.24,"formula":0.24,"structure":0.04,"reaction":0.24,"fragment":0.24}' \
+    --followup-probability 0.5
 ```
 
 Key flags:
 
 | Flag | Default | Description |
 |---|---|---|
-| `--output` | *(required)* | Destination JSONL file |
-| `--split` | `train` | Dataset split |
-| `--sample-size` | `0` (full split) | Rows to sample |
-| `--seed` | `42` | Random seed |
+| `--output` | *(required)* | Destination JSONL path; `{name}` / `{size}` placeholders switch to multi-split mode |
+| `--sizes` | `20000 200 2000` | Train/test/sft row counts in multi-split mode |
+| `--split` | `train` | Dataset split to draw from |
+| `--sample-size` | `0` (full split) | Rows to sample in single-file mode |
+| `--seed` | `42` | Random seed (also orders the disjoint slices) |
 | `--information-mix` | `none`30% `formula`20% `structure`20% `reaction`15% `fragment`15% | JSON dict, shares must sum to 1 |
 | `--followup-probability` | `0.4` | Share where extra info arrives as a second turn |
 | `--max-fragment-items` | `2` | Fragment hints per sample |
 | `--max-reaction-items` | `2` | Reaction context items per sample |
 | `--nmr-noise-ratio` | `0.0` | Share of rows with corrupted NMR spectrum |
 | `--use-llm-rewrite` | off | Rewrite queries with LLM |
-
-See `examples/grpo/augmentation.py` for the config used in the `grpo-nmrexp-20k-qwen3-4b-base` experiment.
 
 ## Format contract (`v1`)
 
@@ -122,10 +141,11 @@ python -m spectune.artifacts compile \
   --input outputs/datasets/nmrexp_train_20000.jsonl \
   --output outputs/datasets/verl/train.parquet \
   --split train \
-  --manifest outputs/datasets/verl/train.manifest.json
+  --manifest outputs/datasets/verl/train.manifest.json \
+  --interaction-config outputs/datasets/verl/interaction_config.yaml
 
 python -m spectune.artifacts compile \
-  --input outputs/datasets/nmrexp_test.jsonl \
+  --input outputs/datasets/nmrexp_test_200.jsonl \
   --output outputs/datasets/verl/test.parquet \
   --split test
 ```

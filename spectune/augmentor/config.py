@@ -178,7 +178,7 @@ class AugmentorConfig:
     nmr_noise_modes: tuple[str, ...] = NMR_NOISE_MODES
     nmr_noise_strength: float = 0.3
     formula_noise_ratio: float = 0.0
-    reaction_noise_ratio: float = 0.0 # TODO
+    reaction_noise_ratio: float = 0.0  # TODO
     # Share of multi-modality rows (rows whose record carries more than one NMR
     # spectrum, e.g. merged 1H/13C entries) that randomly drop some modalities
     # before the query is built. At least one spectrum is always kept.

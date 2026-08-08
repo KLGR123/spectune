@@ -22,9 +22,11 @@ from .utils import as_list, has_rdkit, molecular_formula, strict_canonical_smile
 @dataclass(frozen=True)
 class IndexedReactionData:
     """Records with inverted index for fast candidate retrieval."""
+
     records: tuple[JsonDict, ...]
     # inverted index: reactant_component -> list of record indices
     component_to_records: dict[str, list[int]]
+
 
 _REACTION_SMILES_RE = re.compile(r"([^\s]+>>[^\s]+)")
 
