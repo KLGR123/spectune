@@ -146,6 +146,60 @@ class Augmentor:
         }
         return InMemoryDataset(records)
 
+    def build_splits(
+        self,
+        dataset: Dataset | Sequence[JsonDict] | None = None,
+        *,
+        sizes: tuple[int, int, int] = (20000, 200, 2000),
+        output_paths: dict[str, Path],
+    ) -> dict[str, InMemoryDataset]:
+        """Synchronous wrapper around :meth:`build_splits_async`."""
+        return asyncio.run(self.build_splits_async(dataset, sizes=sizes, output_paths=output_paths))
+
+    async def build_splits_async(
+        self,
+        dataset: Dataset | Sequence[JsonDict] | None = None,
+        *,
+        sizes: tuple[int, int, int] = (20000, 200, 2000),
+        output_paths: dict[str, Path],
+    ) -> dict[str, InMemoryDataset]:
+        """Build three disjoint splits (train/test/sft) from one shuffle of the truth pool.
+
+        Disjointness is guaranteed by construction: the pool is shuffled once with the
+        configured seed, then sliced into three contiguous windows.  Enrichment runs over
+        the full union in a single pass so the SMILES cache is warmed only once.
+        """
+        base = InMemoryDataset(dataset) if isinstance(dataset, Sequence) else dataset
+        if base is None:
+            base = self.load_truth()
+
+        n_train, n_test, n_sft = sizes
+        total_needed = n_train + n_test + n_sft
+        if len(base) < total_needed:
+            raise ValueError(
+                f"truth pool has {len(base)} records but {total_needed} are needed "
+                f"({n_train}+{n_test}+{n_sft}); reduce --sizes or use a larger split"
+            )
+
+        shuffled = list(base.shuffle(seed=self.config.seed).take(total_needed))
+        enriched = list(await self.enricher.enrich_async(shuffled))
+
+        split_defs = [
+            ("train", enriched[:n_train]),
+            ("test", enriched[n_train : n_train + n_test]),
+            ("sft", enriched[n_train + n_test :]),
+        ]
+
+        results: dict[str, InMemoryDataset] = {}
+        for name, raw in split_defs:
+            plans = [self._plan(r, i) for i, r in enumerate(raw)]
+            rewrites = await self._rewrite(plans)
+            records = [self._assemble(p, rw) for p, rw in zip(plans, rewrites, strict=True)]
+            write_jsonl(output_paths[name], records)
+            results[name] = InMemoryDataset(records)
+
+        return results
+
     # Scenario planning
 
     def _plan(self, record: JsonDict, index: int) -> JsonDict:
@@ -188,7 +242,7 @@ class Augmentor:
                 noise_details.append(detail)
             noised_nmr_proxy = [
                 {"shift_text": part, "type": (nmr or {}).get("type")}
-                for nmr, part in zip(nmr_list, noised_parts)
+                for nmr, part in zip(nmr_list, noised_parts, strict=True)
             ]
             spectrum_text = build_multimodal_spectrum_text(noised_nmr_proxy, rng)
             noise = {"mode": mode, "applied": True, "per_spectrum": noise_details}

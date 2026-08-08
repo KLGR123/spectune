@@ -5,7 +5,7 @@ set -xeuo pipefail
 NNODES=1
 NDEVICES_PER_NODE=8
 PROJECT_NAME=spectune
-EXPERIMENT_NAME=grpo-nmrexp-20k-qwen2.5-7b-base
+EXPERIMENT_NAME=grpo-nmrexp-20k-qwen3-8b-base
 
 # fill in the following paths
 export SPECTUNE_ROOT=/fs_mol/liujiarun/spectune
@@ -13,7 +13,7 @@ export VERL_ROOT=/fs_mol/liujiarun/verl
 export TRAIN_FILE=$SPECTUNE_ROOT/outputs/datasets/verl/train.parquet
 export TEST_FILE=$SPECTUNE_ROOT/outputs/datasets/verl/test.parquet
 export TOOL_CONFIG=$SPECTUNE_ROOT/outputs/datasets/verl/tools_config.yaml
-export MODEL_PATH=/fs_mol/liujiarun/models/qwen2.5-7b-instruct
+export MODEL_PATH=/fs_mol/liujiarun/models/qwen3-8b-instruct
 export TENSORBOARD_DIR=$SPECTUNE_ROOT/outputs/tensorboard/$PROJECT_NAME/$EXPERIMENT_NAME
 
 
@@ -60,6 +60,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.rollout.multi_turn.max_user_turns=8 \
   actor_rollout_ref.rollout.multi_turn.max_tool_response_length=8192 \
   actor_rollout_ref.rollout.multi_turn.tool_config_path="${TOOL_CONFIG}" \
+  actor_rollout_ref.rollout.multi_turn.interaction_config_path="${SPECTUNE_ROOT}/outputs/datasets/verl/interaction_config.yaml" \
   actor_rollout_ref.rollout.agent.default_agent_loop=tool_agent \
   reward_model.reward_manager=naive \
   custom_reward_function.path="${SPECTUNE_ROOT}/spectune/reward/verl.py" \

@@ -106,7 +106,7 @@ extra_info = {
             "smiles_validity": 0.1,
             "tool_call_count": 0.1,
         },
-    }
+    },
 }
 ```
 

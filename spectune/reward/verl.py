@@ -89,7 +89,7 @@ def compute_score(
     extra_info = extra_info if isinstance(extra_info, Mapping) else {}
 
     if os.getenv("VERL_DEBUG"):
-        print(f"\n[DEBUG] === compute_score entry ===")
+        print("\n[DEBUG] === compute_score entry ===")
         print(f"[DEBUG] ground_truth = {ground_truth!r}")
         rollout_msgs = extra_info.get("rollout_messages")
         if rollout_msgs:

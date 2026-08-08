@@ -112,7 +112,9 @@ FRAGMENT_LEXICON: tuple[FragmentDefinition, ...] = (
     FragmentDefinition("cyclopropane", "[CX4;R]1[CX4;R][CX4;R]1", "环丙烷", "cyclopropane", "ring", 4),
     FragmentDefinition("cyclobutane", "[CX4;R]1[CX4;R][CX4;R][CX4;R]1", "环丁烷", "cyclobutane", "ring", 3),
     FragmentDefinition("cyclopentane", "[CX4;R]1[CX4;R][CX4;R][CX4;R][CX4;R]1", "环戊烷", "cyclopentane", "ring", 2),
-    FragmentDefinition("cyclohexane", "[CX4;R]1[CX4;R][CX4;R][CX4;R][CX4;R][CX4;R]1", "环己烷", "cyclohexane", "ring", 2),
+    FragmentDefinition(
+        "cyclohexane", "[CX4;R]1[CX4;R][CX4;R][CX4;R][CX4;R][CX4;R]1", "环己烷", "cyclohexane", "ring", 2
+    ),
     FragmentDefinition("oxetane", "[CX4;R]1[CX4;R][OX2;R][CX4;R]1", "氧杂环丁烷", "oxetane", "ring", 4),
     FragmentDefinition("azetidine", "[CX4;R]1[CX4;R][NX3;R][CX4;R]1", "氮杂环丁烷", "azetidine", "ring", 4),
     FragmentDefinition("piperidine", "C1CCNCC1", "哌啶环", "piperidine", "ring", 4),
@@ -141,12 +143,8 @@ FRAGMENT_LEXICON: tuple[FragmentDefinition, ...] = (
     FragmentDefinition("acetal", "[CX4]([OX2][#6])[OX2][#6]", "缩醛/缩酮", "acetal or ketal", "group", 3),
     # [OX2] also matches -OH, so the unqualified pattern called a gem-triol an
     # orthoester; all three oxygens have to carry a carbon.
-    FragmentDefinition(
-        "orthoester", "[CX4]([OX2H0][#6])([OX2H0][#6])[OX2H0][#6]", "原酸酯", "orthoester", "group", 5
-    ),
-    FragmentDefinition(
-        "cyclic_imide", "O=[CX3;R][NX3;R][CX3;R]=O", "环状酰亚胺", "cyclic imide", "group", 4
-    ),
+    FragmentDefinition("orthoester", "[CX4]([OX2H0][#6])([OX2H0][#6])[OX2H0][#6]", "原酸酯", "orthoester", "group", 5),
+    FragmentDefinition("cyclic_imide", "O=[CX3;R][NX3;R][CX3;R]=O", "环状酰亚胺", "cyclic imide", "group", 4),
     # Nitrogen groups
     FragmentDefinition("nitrile", "[NX1]#[CX2]", "腈基", "nitrile", "group", 4),
     # The trailing [#6] is what makes this a C-nitro group; without it a nitrate
@@ -165,9 +163,7 @@ FRAGMENT_LEXICON: tuple[FragmentDefinition, ...] = (
     ),
     # A Schiff base: neither the carbon nor the nitrogen may carry a heteroatom,
     # which is what keeps amidines, guanidines, oximes and hydrazones out.
-    FragmentDefinition(
-        "imine", "[CX3;!$(C[!#6;!#1])]=[NX2;!$(N[!#6;!#1])]", "亚胺", "imine", "group", 4
-    ),
+    FragmentDefinition("imine", "[CX3;!$(C[!#6;!#1])]=[NX2;!$(N[!#6;!#1])]", "亚胺", "imine", "group", 4),
     FragmentDefinition("amidine", "[NX3][CX3]=[NX2]", "脒基", "amidine", "group", 4),
     FragmentDefinition("guanidine", "[NX3][CX3](=[NX2])[NX3]", "胍基", "guanidine", "group", 5),
     FragmentDefinition("hydrazone", "[NX3][NX2]=[CX3]", "腙", "hydrazone", "group", 5),
@@ -221,15 +217,9 @@ FRAGMENT_LEXICON: tuple[FragmentDefinition, ...] = (
     FragmentDefinition("thiourea", "[NX3][CX3](=[SX1])[NX3]", "硫脲基", "thiourea", "group", 4),
     FragmentDefinition("disulfide", "[#16X2][#16X2]", "二硫键", "disulfide", "group", 4),
     FragmentDefinition("sulfonic_acid", "[SX4](=O)(=O)[OX2H1]", "磺酸基", "sulfonic acid", "group", 4),
-    FragmentDefinition(
-        "sulfonate_ester", "[SX4](=O)(=O)[OX2H0][#6]", "磺酸酯", "sulfonate ester", "group", 3
-    ),
-    FragmentDefinition(
-        "triflate", "[OX2][SX4](=O)(=O)C(F)(F)F", "三氟甲磺酸酯(OTf)", "triflate", "group", 5
-    ),
-    FragmentDefinition(
-        "sulfonyl_chloride", "[SX4](=O)(=O)[Cl]", "磺酰氯", "sulfonyl chloride", "group", 5
-    ),
+    FragmentDefinition("sulfonate_ester", "[SX4](=O)(=O)[OX2H0][#6]", "磺酸酯", "sulfonate ester", "group", 3),
+    FragmentDefinition("triflate", "[OX2][SX4](=O)(=O)C(F)(F)F", "三氟甲磺酸酯(OTf)", "triflate", "group", 5),
+    FragmentDefinition("sulfonyl_chloride", "[SX4](=O)(=O)[Cl]", "磺酰氯", "sulfonyl chloride", "group", 5),
     # Phosphorus is only distinguishable by counting its substituents: three
     # oxygens is a phosphate, two oxygens plus a carbon a phosphonate, three
     # carbons a phosphine oxide. The anionic [OX1-] form matters because
@@ -242,12 +232,8 @@ FRAGMENT_LEXICON: tuple[FragmentDefinition, ...] = (
         "group",
         4,
     ),
-    FragmentDefinition(
-        "phosphonate", "[PX4](=O)([#6])([OX2,OX1-])[OX2,OX1-]", "膦酸酯", "phosphonate", "group", 4
-    ),
-    FragmentDefinition(
-        "phosphine_oxide", "[PX4](=O)([#6])([#6])[#6]", "膦氧基", "phosphine oxide", "group", 4
-    ),
+    FragmentDefinition("phosphonate", "[PX4](=O)([#6])([OX2,OX1-])[OX2,OX1-]", "膦酸酯", "phosphonate", "group", 4),
+    FragmentDefinition("phosphine_oxide", "[PX4](=O)([#6])([#6])[#6]", "膦氧基", "phosphine oxide", "group", 4),
     FragmentDefinition("phosphine", "[PX3]([#6])([#6])[#6]", "膦", "phosphine", "group", 4),
     # Alkyl / unsaturation
     FragmentDefinition("tert_butyl", "[CX4]([CH3])([CH3])[CH3]", "叔丁基", "tert-butyl", "group", 3),
@@ -299,7 +285,9 @@ FRAGMENT_LEXICON: tuple[FragmentDefinition, ...] = (
         5,
     ),
     FragmentDefinition("tosyl", "Cc1ccc(cc1)[SX4](=O)(=O)", "对甲苯磺酰基(Ts)", "tosyl", "protecting group", 5),
-    FragmentDefinition("tbs", "[Si]([CH3])([CH3])C(C)(C)C", "叔丁基二甲基硅基(TBS)", "TBS group", "protecting group", 5),
+    FragmentDefinition(
+        "tbs", "[Si]([CH3])([CH3])C(C)(C)C", "叔丁基二甲基硅基(TBS)", "TBS group", "protecting group", 5
+    ),
     FragmentDefinition("tms", "[Si]([CH3])([CH3])[CH3]", "三甲基硅基(TMS)", "TMS group", "protecting group", 4),
     FragmentDefinition("silyl", "[Si]", "硅基", "silyl group", "group", 3),
     FragmentDefinition("boronate", "[BX3]([OX2])[OX2]", "硼酸/硼酸酯", "boronic acid or ester", "group", 5),
@@ -396,11 +384,7 @@ def _pyranose_rings(molecule: Any) -> list[tuple[frozenset[int], tuple[int, ...]
         if ring_atoms in seen:
             continue
         seen.add(ring_atoms)
-        oxygenated = {
-            index
-            for index in match
-            if index != match[1] and _exocyclic_oxygens(molecule, index, ring_atoms)
-        }
+        oxygenated = {index for index in match if index != match[1] and _exocyclic_oxygens(molecule, index, ring_atoms)}
         if len(oxygenated) < _MIN_SUGAR_OXYGENS:
             continue
         anomeric = tuple(index for index in (match[0], match[2]) if index in oxygenated)
@@ -410,9 +394,7 @@ def _pyranose_rings(molecule: Any) -> list[tuple[frozenset[int], tuple[int, ...]
     return accepted
 
 
-def _glycosidic_oxygens(
-    molecule: Any, pyranoses: list[tuple[frozenset[int], tuple[int, ...]]]
-) -> set[int]:
+def _glycosidic_oxygens(molecule: Any, pyranoses: list[tuple[frozenset[int], tuple[int, ...]]]) -> set[int]:
     """Anomeric oxygens that bridge a confirmed sugar ring to an aglycone.
 
     A reducing sugar's anomeric carbon carries a free -OH, whose only heavy
@@ -431,8 +413,7 @@ def _glycosidic_oxygens(
                     if partner.GetIdx() == carbon_index or partner.GetSymbol() != "C":
                         continue
                     if any(
-                        bond.GetBondTypeAsDouble() == 2.0
-                        and bond.GetOtherAtom(partner).GetSymbol() in ("O", "N", "S")
+                        bond.GetBondTypeAsDouble() == 2.0 and bond.GetOtherAtom(partner).GetSymbol() in ("O", "N", "S")
                         for bond in partner.GetBonds()
                     ):
                         continue
@@ -509,9 +490,7 @@ def _skeleton_hints(molecule: Any) -> list[JsonDict]:
 
     peptide_bond = _compiled(_PEPTIDE_BOND_SMARTS)
     if peptide_bond is not None:
-        num_peptide_bonds = len(
-            molecule.GetSubstructMatches(peptide_bond, uniquify=True, maxMatches=_MAX_MATCHES)
-        )
+        num_peptide_bonds = len(molecule.GetSubstructMatches(peptide_bond, uniquify=True, maxMatches=_MAX_MATCHES))
         if num_peptide_bonds >= 2:
             hints.append(
                 {

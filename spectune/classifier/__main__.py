@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 
 from spectune.classifier import Classifier, ClassifierConfig
 from spectune.dataloader.base import JsonlDataset
@@ -18,8 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m spectune.classifier",
         description=(
-            "Cluster an NMRexp truth JSONL file by molecular structure and "
-            "annotate each record with a 'cluster' label."
+            "Cluster an NMRexp truth JSONL file by molecular structure and annotate each record with a 'cluster' label."
         ),
     )
     p.add_argument(

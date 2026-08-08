@@ -124,7 +124,7 @@ class RewardEvaluator:
             warnings.append("ground truth does not contain a non-empty SMILES")
 
         if os.getenv("VERL_DEBUG"):
-            print(f"\n[DEBUG] === reward calculation ===")
+            print("\n[DEBUG] === reward calculation ===")
             print(f"[DEBUG] ground_truth_smiles = {gt_smiles!r}, gt_rank = {gt_rank}")
             print(f"[DEBUG] answer_candidates = {raw_candidates}")
             print(f"[DEBUG] valid_candidates = {valid_candidates}")

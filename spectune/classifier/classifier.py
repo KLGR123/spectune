@@ -461,7 +461,6 @@ def _clustering_dependencies() -> tuple[Any, Any, Any]:
     return np, MiniBatchKMeans, StandardScaler
 
 
-
 def _all_records_clustered(dataset: Dataset, cluster_key: str) -> bool:
     return all(cluster_key in record and record[cluster_key] is not None for record in dataset)
 
@@ -517,7 +516,6 @@ def _nmr_representatives(
         record = dataset[int(indices[representative_position])]
         representatives[label] = str(record.get("gt_smiles") or "")
     return representatives
-
 
 
 def _record_representatives(

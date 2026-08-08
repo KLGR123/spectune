@@ -111,8 +111,7 @@ RETRO_TEMPLATES: tuple[RetroTemplate, ...] = (
         # "split" into an amine plus an invented carbamic acid that is not a
         # real reagent. Formamide (R = H there) is unaffected, since the
         # exclusion needs two distinct heavy neighbours to fire.
-        "[C;!$([CX3](=O)(N)[#7,#8]):1](=[O:2])"
-        "[NX3;!$([N](C(=O))C(=O));!$(N[a]):3]>>[C:1](=[O:2])[OH].[N:3]",
+        "[C;!$([CX3](=O)(N)[#7,#8]):1](=[O:2])[NX3;!$([N](C(=O))C(=O));!$(N[a]):3]>>[C:1](=[O:2])[OH].[N:3]",
         "酰胺缩合",
         "amide coupling",
         "羧酸与胺，HATU/EDCI 与 DIPEA",
@@ -310,7 +309,8 @@ RETRO_TEMPLATES: tuple[RetroTemplate, ...] = (
         "糖苷化",
         "glycosylation",
         "糖基供体(异头位卤代/三氯乙亚胺酸酯等活化)与配基醇/酚,Lewis 酸(TMSOTf/BF3·OEt2)促进",
-        "activated glycosyl donor (anomeric halide/trichloroacetimidate etc.) + acceptor alcohol/phenol, Lewis-acid promoter (TMSOTf/BF3\u00b7OEt2)",
+        "activated glycosyl donor (anomeric halide/trichloroacetimidate etc.)"
+        " + acceptor alcohol/phenol, Lewis-acid promoter (TMSOTf/BF3\u00b7OEt2)",
     ),
 )
 

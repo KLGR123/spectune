@@ -148,18 +148,18 @@ def apply_nmr_noise(
 # Maps NMR type keywords to Chinese labels used in the "labelled phrasing" rendering mode.
 # Matched case-insensitively against the nmr["type"] field.
 _NMR_TYPE_ZH: tuple[tuple[str, str], ...] = (
-    ("1H",  "氢谱"),
+    ("1H", "氢谱"),
     ("13C", "碳谱"),
     ("19F", "氟谱"),
     ("31P", "磷谱"),
     ("11B", "硼谱"),
-    ("29Si","硅谱"),
+    ("29Si", "硅谱"),
     ("15N", "氮谱"),
-    ("DEPT","DEPT谱"),
-    ("COSY","COSY谱"),
-    ("HSQC","HSQC谱"),
-    ("HMBC","HMBC谱"),
-    ("NOESY","NOESY谱"),
+    ("DEPT", "DEPT谱"),
+    ("COSY", "COSY谱"),
+    ("HSQC", "HSQC谱"),
+    ("HMBC", "HMBC谱"),
+    ("NOESY", "NOESY谱"),
 )
 
 # Phrasing patterns for the Chinese-label rendering path.
@@ -215,7 +215,7 @@ def build_multimodal_spectrum_text(
     template = rng.choice(_MULTIMODAL_LABEL_TEMPLATES)
     connector = rng.choice(_MULTIMODAL_CONNECTORS)
     parts: list[str] = []
-    for nmr, line in zip(nmr_list, lines):
+    for nmr, line in zip(nmr_list, lines, strict=True):
         nmr_type = str((nmr or {}).get("type") or "").strip()
         label = _nmr_type_zh(nmr_type) if nmr_type else "谱图"
         parts.append(template.format(label=label, data=line))

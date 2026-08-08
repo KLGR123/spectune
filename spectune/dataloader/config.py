@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal
 
-
 _DEFAULT_NMREXP_SOURCES: Mapping[str, str] = MappingProxyType(
     {
         "raw": "NMRexp_10to24_1_1004.parquet",
