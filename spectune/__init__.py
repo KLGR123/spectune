@@ -26,6 +26,13 @@ from .format.v1 import (
 )
 from .llm import LlmClient, LlmConfig
 from .reward import RewardConfig, RewardEvaluator, RewardResult
+from .rollout import (
+    BaseSampler,
+    GtRejectionSampler,
+    Rollout,
+    RolloutConfig,
+    RolloutRecord,
+)
 from .tools import (
     AskcosReactionForwardPredictConfig,
     AskcosReactionForwardPredictTool,
@@ -96,6 +103,11 @@ __all__ = [
     "RewardConfig",
     "RewardEvaluator",
     "RewardResult",
+    "BaseSampler",
+    "GtRejectionSampler",
+    "Rollout",
+    "RolloutConfig",
+    "RolloutRecord",
     "SYSTEM_PROMPT",
     "SemanticScholarSearchConfig",
     "SemanticScholarSearchTool",

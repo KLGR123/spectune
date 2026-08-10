@@ -240,7 +240,7 @@ def config_to_dict(config: ArtifactCompileConfig) -> JsonDict:
 
 
 _INTERACTION_CONFIG_TEMPLATE = (
-    "interaction:\n  - class_name: spectune.artifacts.followup.ScriptedFollowupInteraction\n    config: {}\n"
+    "interaction:\n  - class_name: spectune.artifacts.followup.ScriptedFollowupInteraction\n    name: scripted_followup\n    config: {}\n"
 )
 
 

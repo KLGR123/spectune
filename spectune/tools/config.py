@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
+
+NMR_GENERATE_MAX_TOPK = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +61,10 @@ class NmrGenerateConfig:
     api_url: str = field(default_factory=lambda: os.getenv("NMR_GENERATE_API_URL", ""))
     timeout_s: float = 180.0
     default_topk: int = 10
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.default_topk <= NMR_GENERATE_MAX_TOPK:
+            raise ValueError(f"nmr_generate default_topk must be in [1, {NMR_GENERATE_MAX_TOPK}]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,3 +240,16 @@ class ToolManagerConfig:
     semantic_scholar_search: SemanticScholarSearchConfig = field(default_factory=SemanticScholarSearchConfig)
     crossref_search: CrossrefSearchConfig = field(default_factory=CrossrefSearchConfig)
     wikipedia_search: WikipediaSearchConfig = field(default_factory=WikipediaSearchConfig)
+    # Overrides NmrGenerateConfig.default_topk when set (e.g. from the rollout /
+    # verl tool-config surfaces). Kept separate so env-based defaults stay intact.
+    nmr_gen_topk: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.nmr_gen_topk is not None:
+            if not 1 <= self.nmr_gen_topk <= NMR_GENERATE_MAX_TOPK:
+                raise ValueError(f"nmr_gen_topk must be in [1, {NMR_GENERATE_MAX_TOPK}]")
+            object.__setattr__(
+                self,
+                "nmr_generate",
+                replace(self.nmr_generate, default_topk=self.nmr_gen_topk),
+            )

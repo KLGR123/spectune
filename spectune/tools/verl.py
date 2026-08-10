@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from spectune.tools.base import compact_tool_payload
 from spectune.tools.catalog import (
     DEFAULT_RL_TOOL_NAMES,
     openai_schema_for,
@@ -30,6 +31,8 @@ from spectune.tools.catalog import (
     schemas_for_names,
     shared_manager,
 )
+from spectune.tools.config import NMR_GENERATE_MAX_TOPK, ToolManagerConfig
+from spectune.tools.manager import ToolManager
 
 JsonDict = dict[str, Any]
 
@@ -39,26 +42,28 @@ def build_tools_config(
     *,
     manager: Any = None,
     class_name: str = "spectune.tools.verl.SpectuneTool",
+    nmr_gen_topk: int | None = None,
 ) -> JsonDict:
     """Build a verl ``tools:`` config mapping (ready to dump as YAML).
 
     Entries are schema-free: ``SpectuneTool`` loads the full JSON Schema tree
     from :class:`~spectune.tools.ToolManager` at init. Do **not** embed schemas
     in YAML — verl's pydantic models silently drop ``items`` / ``minimum`` / …
+
+    ``nmr_gen_topk`` (1..NMR_GENERATE_MAX_TOPK) is recorded on the
+    ``nmr_generate`` entry; ``SpectuneTool`` applies it as the tool's default
+    ``topk`` at init.
     """
+    if nmr_gen_topk is not None and not 1 <= nmr_gen_topk <= NMR_GENERATE_MAX_TOPK:
+        raise ValueError(f"nmr_gen_topk must be in [1, {NMR_GENERATE_MAX_TOPK}]")
     names = resolve_tool_names(tool_names, manager=manager)
-    return {
-        "tools": [
-            {
-                "class_name": class_name,
-                "config": {
-                    "type": "native",
-                    "tool_name": name,
-                },
-            }
-            for name in names
-        ]
-    }
+    entries = []
+    for name in names:
+        config = {"type": "native", "tool_name": name}
+        if nmr_gen_topk is not None and name == "nmr_generate":
+            config["nmr_gen_topk"] = nmr_gen_topk
+        entries.append({"class_name": class_name, "config": config})
+    return {"tools": entries}
 
 
 def _yaml_escape(value: str) -> str:
@@ -119,12 +124,13 @@ def write_tools_config(
     tool_names: Sequence[str] | None = None,
     *,
     manager: Any = None,
+    nmr_gen_topk: int | None = None,
 ) -> Path:
     """Write a verl ``tool_config_path`` YAML for Spectune tools."""
     destination = Path(path).expanduser()
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
-        tools_config_to_yaml(build_tools_config(tool_names, manager=manager)),
+        tools_config_to_yaml(build_tools_config(tool_names, manager=manager, nmr_gen_topk=nmr_gen_topk)),
         encoding="utf-8",
     )
     return destination
@@ -183,17 +189,6 @@ class _FunctionView:
         self.strict = strict
 
 
-def _compact_tool_payload(result: Any) -> JsonDict:
-    """Serialize a ToolResult for the model context without request echoes."""
-    payload = result.to_dict() if hasattr(result, "to_dict") else dict(result)
-    data = payload.get("data")
-    if isinstance(data, Mapping):
-        payload["data"] = {key: value for key, value in data.items() if key != "request"}
-    if not payload.get("warnings"):
-        payload.pop("warnings", None)
-    return payload
-
-
 class SpectuneTool:
     """Duck-typed verl ``BaseTool`` wrapper around :class:`~spectune.tools.ToolManager`.
 
@@ -209,7 +204,15 @@ class SpectuneTool:
         if not isinstance(tool_name, str) or not tool_name.strip():
             raise ValueError("SpectuneTool config.tool_name is required")
         self._tool_name = tool_name.strip()
-        self.tool_schema = PreservedOpenAIToolSchema(openai_schema_for(self._tool_name))
+        # A run-level nmr_gen_topk (from tools_config.yaml) overrides the
+        # nmr_generate default topk.  Use a dedicated manager so both the
+        # schema default and execution honor it without touching the shared one.
+        topk = self.config.get("nmr_gen_topk")
+        self._manager = None
+        if topk is not None:
+            self._manager = ToolManager.from_config(ToolManagerConfig(nmr_gen_topk=topk))
+        manager = self._manager or shared_manager()
+        self.tool_schema = PreservedOpenAIToolSchema(openai_schema_for(self._tool_name, manager=manager))
         self.name = self.tool_schema.function.name
         # Per-trajectory state keyed by instance_id (reserved for create_kwargs).
         self._instances: dict[str, dict[str, Any]] = {}
@@ -244,8 +247,9 @@ class SpectuneTool:
 
         del kwargs
         try:
-            result = await shared_manager().invoke(self._tool_name, parameters or {})
-            text = json.dumps(_compact_tool_payload(result), ensure_ascii=False)
+            manager = self._manager or shared_manager()
+            result = await manager.invoke(self._tool_name, parameters or {})
+            text = json.dumps(compact_tool_payload(result), ensure_ascii=False)
             metrics = {
                 "completion": result.completion,
                 "status": result.status,

@@ -1,7 +1,7 @@
 """Public tool APIs."""
 
 from .askcos_reaction_forward_predict import AskcosReactionForwardPredictTool
-from .base import Tool, ToolResult
+from .base import Tool, ToolResult, compact_tool_payload
 from .catalog import DEFAULT_RL_TOOL_NAMES, resolve_tool_names, schemas_for_names
 from .code_interpreter import CodeInterpreterTool
 from .config import (
@@ -65,6 +65,7 @@ __all__ = [
     "WebSearchTool",
     "WikipediaSearchConfig",
     "WikipediaSearchTool",
+    "compact_tool_payload",
     "resolve_tool_names",
     "schemas_for_names",
 ]

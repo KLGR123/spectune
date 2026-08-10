@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 FORMAT_SPEC_VERSION = "v1"
@@ -16,6 +16,8 @@ FORMAT_SPEC_VERSION = "v1"
 # Hermes-compatible tool calls (matches verl multi_turn.format=hermes).
 TOOL_CALL_START = "<tool_call>"
 TOOL_CALL_END = "</tool_call>"
+TOOL_RESPONSE_START = "<tool_response>"
+TOOL_RESPONSE_END = "</tool_response>"
 
 _TOOL_CALL_RE = re.compile(
     rf"{re.escape(TOOL_CALL_START)}\s*(.*?)\s*{re.escape(TOOL_CALL_END)}",
@@ -56,6 +58,51 @@ def format_final_answer(smiles: Sequence[str]) -> str:
 def strip_tool_calls(text: str) -> str:
     """Remove hermes tool-call blocks so answer parsing sees only the reply."""
     return _TOOL_CALL_RE.sub("", text or "").strip()
+
+
+def extract_tool_calls(text: str) -> list[dict[str, Any]]:
+    """Parse hermes ``<tool_call>`` blocks from a model response.
+
+    Returns ``[{"name": ..., "arguments": {...}}]``.  Blocks that are not
+    valid JSON objects (or lack a ``name``) are skipped, mirroring verl's
+    ``HermesToolParser``.  ``arguments`` is passed through as-is (mapping or
+    JSON string) so callers can hand it straight to ``ToolManager.invoke``.
+    """
+    calls: list[dict[str, Any]] = []
+    for match in _TOOL_CALL_RE.finditer(text or ""):
+        try:
+            parsed = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        name = parsed.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        arguments = parsed.get("arguments", {})
+        if not isinstance(arguments, (dict, str)):
+            arguments = {}
+        calls.append({"name": name.strip(), "arguments": arguments})
+    return calls
+
+
+def format_tools_block(tool_schemas: Sequence[Mapping[str, Any]]) -> str:
+    """Render the hermes tools block injected into the system prompt.
+
+    Matches the text Qwen3's chat template emits for ``tools=[...]`` (and what
+    verl GRPO therefore shows the model), so offline rollout sees the same
+    tool surface as training.
+    """
+    rendered = "\n".join(json.dumps(schema, ensure_ascii=False) for schema in tool_schemas)
+    return (
+        "# Tools\n\n"
+        "You may call one or more functions to assist with the user query.\n\n"
+        "You are provided with function signatures within <tools></tools> XML tags:\n"
+        f"<tools>\n{rendered}\n</tools>\n\n"
+        "For each function call, return a json object with function name and arguments "
+        "within <tool_call></tool_call> XML tags:\n"
+        f'{TOOL_CALL_START}\n{{"name": <function-name>, "arguments": <args-json-object>}}\n{TOOL_CALL_END}'
+    )
 
 
 def _looks_like_tool_result(text: str) -> bool:
@@ -210,9 +257,13 @@ __all__ = [
     "SYSTEM_PROMPT",
     "TOOL_CALL_END",
     "TOOL_CALL_START",
+    "TOOL_RESPONSE_END",
+    "TOOL_RESPONSE_START",
     "extract_smiles_candidates",
+    "extract_tool_calls",
     "final_answer_region",
     "format_final_answer",
+    "format_tools_block",
     "messages_from_decoded_hermes",
     "strip_tool_calls",
 ]

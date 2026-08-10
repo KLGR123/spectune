@@ -173,7 +173,17 @@ python -m spectune.tools write-config \
 python -m spectune.tools write-config \
     --output outputs/datasets/verl/tools_config.yaml \
     --tools nmr_generate nmr_repair nmr_forward_predict
+
+# raise the nmr_generate candidate budget (default topk 10, max 50)
+python -m spectune.tools write-config \
+    --output outputs/datasets/verl/tools_config.yaml \
+    --nmr-gen-topk 30
 ```
+
+`--nmr-gen-topk` (default `10`, max `50`) sets the default `topk` of the
+`nmr_generate` tool; it is recorded on the `nmr_generate` entry and honored by
+`SpectuneTool` for both the tool schema default and tool execution during GRPO
+rollout.
 
 `SpectuneTool` loads **full** schemas from `ToolManager` (it does not use verl's
 pydantic schema models, which would drop `items` / `minimum` / …). Keep YAML
@@ -208,3 +218,78 @@ python scripts/legacy_model_merger.py merge \
     --local_dir /path/to/checkpoints/spectune/grpo-nmrexp-20k-qwen3-4b-base/global_step_500/actor \
     --target_dir /path/to/checkpoints/spectune/grpo-nmrexp-20k-qwen3-4b-base/global_step_500/actor/huggingface
 ```
+
+## SFT with Rollout-Filtered Data
+
+Supervised fine-tuning using rejection-sampled rollouts as training examples.
+
+### 1. Generate rollout data
+
+```bash
+cd /path/to/spectune
+
+python -m spectune.rollout \
+    --input   outputs/datasets/nmrexp_sft_2000.jsonl \
+    --output  outputs/datasets/verl/nmrexp_sft_rollout_w_rs_3.parquet \
+    --format  parquet \
+    --rounds  3 \
+    --temperature 0.6 \
+    --max-tokens 16384 \
+    --nmr-gen-topk 30 \
+    --max-concurrency 8 \
+    --model qwen3-max
+```
+
+This reads the SFT split produced by `python -m spectune.augmentor` and runs a
+hermes **tool-agent loop** per sample: the LLM generates, any `<tool_call>`
+blocks are executed for real via `ToolManager` (results fed back as
+`<tool_response>` turns), and generation repeats until the model stops calling
+tools or `--max-assistant-turns` is reached.  The whole trajectory is retried up
+to `--rounds` times, keeping only the first one where the model correctly
+identifies the ground-truth SMILES (GT rejection sampling via
+`spectune.reward.RewardEvaluator`).  Each accepted record contains a `messages`
+list — `[system, user, ..., assistant]` — ready for verl multiturn SFT.
+
+Key flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input` | *(required)* | nmrexp_sft_*.jsonl from `python -m spectune.augmentor` |
+| `--output` | auto-derived | Destination JSONL or Parquet |
+| `--format` | `jsonl` | Output format (`jsonl` / `parquet`) |
+| `--rounds` | `8` | Max rejection-sampling rounds per sample (k) |
+| `--temperature` | `0.8` | LLM sampling temperature |
+| `--top-p` | `0.95` | Top-p nucleus sampling |
+| `--max-tokens` | `4096` | Max tokens per LLM response |
+| `--nmr-gen-topk` | `10` | Default `topk` for `nmr_generate` candidate generation (max `50`) |
+| `--tools` | `DEFAULT_RL_TOOL_NAMES` | Tool names exposed to the model |
+| `--max-assistant-turns` | `16` | Max LLM generations per agent loop (matches verl `multi_turn.max_assistant_turns`) |
+| `--max-concurrency` | `8` | Max concurrent LLM requests |
+| `--model` | `SPECTUNE_LLM_MODEL` env | Override LLM model name (e.g. `GPT-5.4`) |
+| `--no-progress` | off | Suppress tqdm progress bar |
+
+LLM endpoint is read from `SPECTUNE_LLM_BASE_URL`, `SPECTUNE_LLM_MODEL`, and
+`SPECTUNE_LLM_API_KEY` (see `secrets.env.example`).
+
+### 2. Compile a validation file (if not already done)
+
+```bash
+python -m spectune.artifacts compile \
+    --input  outputs/datasets/nmrexp_test_200.jsonl \
+    --output outputs/datasets/verl/test.parquet \
+    --split  test
+```
+
+### 3. Launch SFT
+
+```bash
+bash examples/grpo/run_sft.sh
+```
+
+The script calls `verl.trainer.fsdp_sft_trainer` via `torchrun` with multiturn
+mode enabled (`data.multiturn.messages_key=messages`).  Key overrides:
+
+- `data.multiturn.enable=true` — treat each row's `messages` list as a full conversation
+- `data.max_length=8192` — covers tool-call traces
+- `model.partial_pretrain` — base model path (default: `qwen3-8b`)
+- `trainer.total_epochs=3` — adjust to dataset size

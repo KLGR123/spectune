@@ -38,14 +38,20 @@ class LlmClient:
 
     async def complete(self, system_prompt: str, user_prompt: str) -> str:
         """Return the assistant message, or ``""`` if the call could not be made."""
+        return await self.complete_messages(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+        )
+
+    async def complete_messages(self, messages: list[JsonDict]) -> str:
+        """Return the assistant message for a full message list, or ``""`` on failure."""
         if not self.available:
             return ""
         payload = {
             "model": self.config.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            "messages": messages,
             "temperature": self.config.temperature,
             "top_p": self.config.top_p,
             "max_tokens": self.config.max_tokens,

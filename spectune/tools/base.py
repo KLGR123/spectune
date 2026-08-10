@@ -28,6 +28,17 @@ class ToolResult:
         return asdict(self)
 
 
+def compact_tool_payload(result: Any) -> JsonDict:
+    """Serialize a ToolResult for the model context without request echoes."""
+    payload = result.to_dict() if hasattr(result, "to_dict") else dict(result)
+    data = payload.get("data")
+    if isinstance(data, Mapping):
+        payload["data"] = {key: value for key, value in data.items() if key != "request"}
+    if not payload.get("warnings"):
+        payload.pop("warnings", None)
+    return payload
+
+
 class Tool(ABC):
     """An executable tool with an OpenAI-compatible function schema."""
 

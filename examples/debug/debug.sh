@@ -16,6 +16,7 @@ export TOOL_CONFIG=$SPECTUNE_ROOT/examples/grpo/tools_config.yaml
 export MODEL_PATH=/fs_mol/guojianz/projects/FunMG/LLM/model_weight/qwen/models--Qwen--Qwen3-4B-Instruct-2507
 export TENSORBOARD_DIR=$SPECTUNE_ROOT/outputs/tensorboard/$PROJECT_NAME/$EXPERIMENT_NAME
 
+# open this for debugging
 export VERL_DEBUG=1
 
 

@@ -30,19 +30,13 @@ def extract_user_input(raw: str) -> str:
 def parse_output_segments(raw: str) -> list[dict]:
     """
     Split model output into alternating segments:
-      - {"type": "text",     "content": "..."}
-      - {"type": "tool_call","content": "..."}   (the JSON inside the tags)
-      - {"type": "tool_response","content": "..."} (tool result from env)
+      - {"type": "text",          "content": "..."}
+      - {"type": "think",         "content": "..."}  (<think> block, tags stripped)
+      - {"type": "tool_call",     "content": "..."}
+      - {"type": "tool_response", "content": "..."}
+      - {"type": "user_turn",     "content": "..."}  (mid-conversation user message)
     """
     segments: list[dict] = []
-
-    # Unified pattern: tool_call blocks and tool_response blocks (embedded via
-    # the "user\n<tool_response>…</tool_response>\nassistant" pattern)
-    TOKEN = re.compile(
-        r"(<tool_call>.*?</tool_call>)"
-        r"|(<tool_response>.*?</tool_response>)",
-        re.DOTALL,
-    )
 
     # Strip the "user\n…\nassistant" role wrappers around tool_response
     cleaned = re.sub(
@@ -52,9 +46,24 @@ def parse_output_segments(raw: str) -> list[dict]:
         flags=re.DOTALL,
     )
 
+    # Convert remaining mid-conversation user turns into a custom tag, skip empty ones
+    cleaned = re.sub(
+        r"\buser\s*\n(.*?)\n\s*assistant\b",
+        lambda m: f"<user_turn>{m.group(1)}</user_turn>" if m.group(1).strip() else "",
+        cleaned,
+        flags=re.DOTALL,
+    )
+
+    TOKEN = re.compile(
+        r"(<tool_call>.*?</tool_call>)"
+        r"|(<tool_response>.*?</tool_response>)"
+        r"|(<think>.*?</think>)"
+        r"|(<user_turn>.*?</user_turn>)",
+        re.DOTALL,
+    )
+
     last = 0
     for m in TOKEN.finditer(cleaned):
-        # text before this match
         text = cleaned[last : m.start()].strip()
         if text:
             segments.append({"type": "text", "content": text})
@@ -63,19 +72,23 @@ def parse_output_segments(raw: str) -> list[dict]:
         if full.startswith("<tool_call>"):
             inner = re.sub(r"^<tool_call>\s*|\s*</tool_call>$", "", full, flags=re.DOTALL).strip()
             try:
-                parsed = json.loads(inner)
-                pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
+                pretty = json.dumps(json.loads(inner), ensure_ascii=False, indent=2)
             except json.JSONDecodeError:
                 pretty = inner
             segments.append({"type": "tool_call", "content": pretty})
-        else:
+        elif full.startswith("<tool_response>"):
             inner = re.sub(r"^<tool_response>\s*|\s*</tool_response>$", "", full, flags=re.DOTALL).strip()
             try:
-                parsed = json.loads(inner)
-                pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
+                pretty = json.dumps(json.loads(inner), ensure_ascii=False, indent=2)
             except json.JSONDecodeError:
                 pretty = inner
             segments.append({"type": "tool_response", "content": pretty})
+        elif full.startswith("<think>"):
+            inner = re.sub(r"^<think>\s*|\s*</think>$", "", full, flags=re.DOTALL).strip()
+            segments.append({"type": "think", "content": inner})
+        else:
+            inner = re.sub(r"^<user_turn>\s*|\s*</user_turn>$", "", full, flags=re.DOTALL).strip()
+            segments.append({"type": "user_turn", "content": inner})
 
         last = m.end()
 
@@ -168,6 +181,10 @@ HTML = r"""<!doctype html>
   .seg-text   .seg-label { background: #f6f8fa; color: var(--gray); }
   .seg-tool   .seg-label { background: #fff0f0; color: #cf222e; }
   .seg-result .seg-label { background: #f0f6ff; color: var(--blue); }
+  .seg-think  .seg-label { background: #f5f0ff; color: var(--purple); }
+  .seg-think  .seg-body  { background: #faf7ff; }
+  .seg-user   .seg-label { background: #f0fff4; color: var(--green); }
+  .seg-user   .seg-body  { background: #f6fffb; font-family: inherit; font-size: 13px; }
   .seg-body { padding: 8px 10px; white-space: pre-wrap; font-family: "SFMono-Regular", Consolas, monospace;
               font-size: 12px; line-height: 1.55; background: var(--code-bg); overflow-x: auto; }
   .seg-text .seg-body { font-family: inherit; font-size: 13px; background: #fff; }
@@ -245,6 +262,16 @@ function renderTraj(t) {
     if (seg.type === 'text') {
       return `<div class="seg seg-text">
         <div class="seg-label">Text</div>
+        <div class="seg-body">${escHtml(seg.content)}</div>
+      </div>`;
+    } else if (seg.type === 'think') {
+      return `<div class="seg seg-think">
+        <div class="seg-label">Think</div>
+        <div class="seg-body">${escHtml(seg.content)}</div>
+      </div>`;
+    } else if (seg.type === 'user_turn') {
+      return `<div class="seg seg-user">
+        <div class="seg-label">User</div>
         <div class="seg-body">${escHtml(seg.content)}</div>
       </div>`;
     } else if (seg.type === 'tool_call') {

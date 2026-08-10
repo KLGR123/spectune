@@ -1,0 +1,246 @@
+"""Parallel offline LLM rollout with tool execution and rejection sampling."""
+
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from spectune.format.v1 import (
+    TOOL_RESPONSE_END,
+    TOOL_RESPONSE_START,
+    extract_tool_calls,
+    format_tools_block,
+)
+from spectune.llm import LlmClient, LlmConfig
+from spectune.tools import (
+    DEFAULT_RL_TOOL_NAMES,
+    ToolManager,
+    ToolManagerConfig,
+    compact_tool_payload,
+    resolve_tool_names,
+    schemas_for_names,
+)
+
+from .config import RolloutConfig
+from .sampling.base import BaseSampler
+
+JsonDict = dict[str, Any]
+
+
+@dataclass
+class RolloutRecord:
+    """One accepted (prompt, response) pair produced by the rollout pipeline."""
+
+    sample_id: str
+    gt_smiles: str
+    # Full conversation ready for SFT: [system, user, ..., assistant]
+    messages: list[JsonDict]
+    reward_score: float
+    reward_details: JsonDict
+    n_rounds: int
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "sample_id": self.sample_id,
+            "gt_smiles": self.gt_smiles,
+            "messages": self.messages,
+            "reward_score": self.reward_score,
+            "reward_details": self.reward_details,
+            "n_rounds": self.n_rounds,
+        }
+
+
+class Rollout:
+    """Parallel offline LLM rollout with optional rejection sampling.
+
+    For each input sample the pipeline:
+
+    1. Builds the prompt from the sample's ``turns`` + configured system prompt
+       (with the hermes tools block injected, like verl GRPO).
+    2. Runs a tool-agent loop: the LLM generates, any hermes ``<tool_call>``
+       blocks are executed via :class:`ToolManager` (honoring
+       ``config.nmr_gen_topk`` for ``nmr_generate``), the results are fed back
+       as ``<tool_response>`` turns, and generation repeats until the model
+       stops calling tools or ``max_assistant_turns`` is exhausted.
+    3. When ``config.max_rounds`` is ``None`` (or ``sampler`` is ``None``):
+       the trajectory is accepted unconditionally.
+    4. When ``max_rounds`` is set: the whole agent loop is retried up to that
+       many times and returns on the first trajectory accepted by ``sampler``.
+       If no round passes, the last successful response is kept as a fallback —
+       no sample is silently dropped unless every LLM call for it fails.
+
+    Multi-turn samples (n user turns) run one agent loop per user turn,
+    threading the previous turns into the context before the next user turn is
+    sent.  Only the final assistant response is evaluated.
+
+    All samples are dispatched concurrently; per-sample retries are sequential.
+    Concurrency is bounded by ``LlmConfig.max_concurrency``.
+    """
+
+    def __init__(
+        self,
+        config: RolloutConfig | None = None,
+        llm_config: LlmConfig | None = None,
+    ) -> None:
+        self.config = config or RolloutConfig()
+        self.llm = LlmClient(
+            dataclasses.replace(
+                llm_config or LlmConfig(),
+                temperature=self.config.temperature,
+                top_p=self.config.top_p,
+                max_tokens=self.config.max_tokens,
+                max_concurrency=self.config.max_concurrency,
+            )
+        )
+        # One manager per run; nmr_gen_topk lands in NmrGenerateConfig so the
+        # schema default and execution both honor it.
+        self.tool_manager = ToolManager.from_config(ToolManagerConfig(nmr_gen_topk=self.config.nmr_gen_topk))
+        names = tuple(self.config.tool_names) or DEFAULT_RL_TOOL_NAMES
+        self.tool_names = resolve_tool_names(names, manager=self.tool_manager)
+        schemas = schemas_for_names(self.tool_names, manager=self.tool_manager)
+        self.system_prompt = self.config.system_prompt + "\n\n" + format_tools_block(schemas)
+
+    async def _run_agent_loop(self, messages: list[JsonDict]) -> str | None:
+        """Generate → execute tool calls → feed results back, until answer or cap.
+
+        Mutates ``messages`` in place.  Returns the final assistant response,
+        or ``None`` if an LLM call fails outright.
+        """
+        final_response = ""
+        for _ in range(self.config.max_assistant_turns):
+            response = await self.llm.complete_messages(messages)
+            if not response:
+                return None
+            messages.append({"role": "assistant", "content": response})
+            final_response = response
+            tool_calls = extract_tool_calls(response)
+            if not tool_calls:
+                break
+            results = await asyncio.gather(
+                *(self.tool_manager.invoke(call["name"], call["arguments"]) for call in tool_calls)
+            )
+            for result in results:
+                payload = json.dumps(compact_tool_payload(result), ensure_ascii=False)
+                messages.append({"role": "user", "content": f"{TOOL_RESPONSE_START}\n{payload}\n{TOOL_RESPONSE_END}"})
+        return final_response
+
+    async def _sample_response(self, sample: JsonDict) -> tuple[str, list[JsonDict]] | None:
+        """Draw one agent-loop trajectory for ``sample``.
+
+        Returns ``(final_response, full_messages)`` or ``None`` on LLM failure.
+        Handles n user turns: each user turn triggers a full agent loop, and the
+        accumulated conversation is carried into the next turn.
+        """
+        turns = sample.get("turns") or []
+        user_turns = [t for t in turns if isinstance(t, dict) and t.get("role") == "user"]
+        if not user_turns:
+            return None
+
+        messages: list[JsonDict] = [
+            {"role": "system", "content": self.system_prompt},
+        ]
+        final_response = ""
+        for user_turn in user_turns:
+            messages.append({"role": "user", "content": str(user_turn.get("content", ""))})
+            response = await self._run_agent_loop(messages)
+            if response is None:
+                return None
+            final_response = response
+
+        return final_response, messages
+
+    async def _run_one(
+        self,
+        sample: JsonDict,
+        sampler: BaseSampler | None,
+        evaluator: Any,
+    ) -> RolloutRecord | None:
+        def _make_record(response: str, full_messages: list[JsonDict], n_rounds: int) -> RolloutRecord:
+            reward = evaluator.evaluate(response, sample.get("gt_smiles", ""))
+            return RolloutRecord(
+                sample_id=str(sample.get("sample_id", "")),
+                gt_smiles=str(sample.get("gt_smiles", "")),
+                messages=full_messages,
+                reward_score=reward.score,
+                reward_details=dict(reward.details),
+                n_rounds=n_rounds,
+            )
+
+        # No rejection sampling: sample once and accept unconditionally.
+        if sampler is None or self.config.max_rounds is None:
+            result = await self._sample_response(sample)
+            if result is None:
+                return None
+            response, full_messages = result
+            return _make_record(response, full_messages, 1)
+
+        # Rejection sampling: try up to max_rounds; fall back to the last
+        # successful response if no round passes the sampler.
+        last: tuple[str, list[JsonDict], int] | None = None
+        for round_idx in range(1, self.config.max_rounds + 1):
+            result = await self._sample_response(sample)
+            if result is None:
+                continue
+            response, full_messages = result
+            last = (response, full_messages, round_idx)
+            if sampler.accept(response, sample):
+                return _make_record(response, full_messages, round_idx)
+
+        if last is None:
+            return None  # every LLM call failed
+        return _make_record(*last)
+
+    async def run(
+        self,
+        samples: list[JsonDict],
+        sampler: BaseSampler | None = None,
+    ) -> list[RolloutRecord]:
+        """Run rollout for all ``samples`` concurrently.
+
+        When ``sampler`` is ``None`` (or ``config.max_rounds`` is ``None``),
+        each sample is called once and accepted unconditionally.  Otherwise
+        rejection sampling is applied up to ``config.max_rounds`` times, with
+        the last successful response kept as a fallback.
+        """
+        from spectune.reward import RewardEvaluator
+
+        evaluator = RewardEvaluator()
+        tasks = [self._run_one(s, sampler, evaluator) for s in samples]
+
+        if self.config.show_progress:
+            try:
+                from tqdm.asyncio import tqdm_asyncio  # type: ignore[import-not-found]
+
+                results = await tqdm_asyncio.gather(*tasks, desc="rollout")
+            except ImportError:
+                results = await asyncio.gather(*tasks)
+        else:
+            results = await asyncio.gather(*tasks)
+
+        return [r for r in results if r is not None]
+
+
+def write_jsonl(records: list[RolloutRecord], path: str | Path) -> None:
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("w", encoding="utf-8") as fh:
+        for record in records:
+            fh.write(json.dumps(record.to_dict(), ensure_ascii=False))
+            fh.write("\n")
+
+
+def write_parquet(records: list[RolloutRecord], path: str | Path) -> None:
+    try:
+        import pandas as pd
+    except ImportError as exc:
+        raise ImportError("writing parquet requires pandas/pyarrow; install with `pip install spectune[data]`") from exc
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([r.to_dict() for r in records]).to_parquet(destination, index=False)
+
+
+__all__ = ["Rollout", "RolloutRecord", "write_jsonl", "write_parquet"]
