@@ -104,14 +104,14 @@ class Rollout:
         schemas = schemas_for_names(self.tool_names, manager=self.tool_manager)
         self.system_prompt = self.config.system_prompt + "\n\n" + format_tools_block(schemas)
 
-    async def _run_agent_loop(self, messages: list[JsonDict]) -> str | None:
+    async def _run_agent_loop(self, messages: list[JsonDict], sample_id: str = "") -> str | None:
         """Generate → execute tool calls → feed results back, until answer or cap.
 
         Mutates ``messages`` in place.  Returns the final assistant response,
         or ``None`` if an LLM call fails outright.
         """
         final_response = ""
-        for _ in range(self.config.max_assistant_turns):
+        for turn_idx in range(self.config.max_assistant_turns):
             response = await self.llm.complete_messages(messages)
             if not response:
                 return None
@@ -119,7 +119,12 @@ class Rollout:
             final_response = response
             tool_calls = extract_tool_calls(response)
             if not tool_calls:
+                if self.config.show_progress:
+                    print(f"[agent] id={sample_id}  turn={turn_idx + 1}  done (no tool call)", flush=True)
                 break
+            if self.config.show_progress:
+                names = ",".join(c["name"] for c in tool_calls)
+                print(f"[agent] id={sample_id}  turn={turn_idx + 1}  tools={names}", flush=True)
             results = await asyncio.gather(
                 *(self.tool_manager.invoke(call["name"], call["arguments"]) for call in tool_calls)
             )
@@ -140,13 +145,14 @@ class Rollout:
         if not user_turns:
             return None
 
+        sample_id = str(sample.get("sample_id", "?"))
         messages: list[JsonDict] = [
             {"role": "system", "content": self.system_prompt},
         ]
         final_response = ""
         for user_turn in user_turns:
             messages.append({"role": "user", "content": str(user_turn.get("content", ""))})
-            response = await self._run_agent_loop(messages)
+            response = await self._run_agent_loop(messages, sample_id=sample_id)
             if response is None:
                 return None
             final_response = response
@@ -198,6 +204,7 @@ class Rollout:
         self,
         samples: list[JsonDict],
         sampler: BaseSampler | None = None,
+        checkpoint_path: str | Path | None = None,
     ) -> list[RolloutRecord]:
         """Run rollout for all ``samples`` concurrently.
 
@@ -205,21 +212,54 @@ class Rollout:
         each sample is called once and accepted unconditionally.  Otherwise
         rejection sampling is applied up to ``config.max_rounds`` times, with
         the last successful response kept as a fallback.
+
+        When ``checkpoint_path`` is set, each accepted record is appended to
+        that file immediately after completion so progress survives a crash.
         """
         from spectune.reward import RewardEvaluator
 
         evaluator = RewardEvaluator()
-        tasks = [self._run_one(s, sampler, evaluator) for s in samples]
+        total = len(samples)
+        counter = [0]
+        sample_sem = asyncio.Semaphore(self.config.max_concurrency)
 
-        if self.config.show_progress:
-            try:
-                from tqdm.asyncio import tqdm_asyncio  # type: ignore[import-not-found]
+        ckpt_fh = None
+        if checkpoint_path is not None:
+            ckpt = Path(checkpoint_path)
+            ckpt.parent.mkdir(parents=True, exist_ok=True)
+            ckpt_fh = ckpt.open("a", encoding="utf-8")
 
-                results = await tqdm_asyncio.gather(*tasks, desc="rollout")
-            except ImportError:
-                results = await asyncio.gather(*tasks)
-        else:
+        async def _run_and_report(s: JsonDict) -> RolloutRecord | None:
+            async with sample_sem:
+                record = await self._run_one(s, sampler, evaluator)
+            counter[0] += 1
+            if self.config.show_progress:
+                if record is not None:
+                    print(
+                        f"[rollout] {counter[0]}/{total}"
+                        f"  id={record.sample_id}"
+                        f"  rounds={record.n_rounds}"
+                        f"  score={record.reward_score:.4f}",
+                        flush=True,
+                    )
+                    print(record.messages)
+                else:
+                    print(
+                        f"[rollout] {counter[0]}/{total}"
+                        f"  id={s.get('sample_id', '?')}  FAILED",
+                        flush=True,
+                    )
+            if record is not None and ckpt_fh is not None:
+                ckpt_fh.write(json.dumps(record.to_dict(), ensure_ascii=False) + "\n")
+                ckpt_fh.flush()
+            return record
+
+        try:
+            tasks = [_run_and_report(s) for s in samples]
             results = await asyncio.gather(*tasks)
+        finally:
+            if ckpt_fh is not None:
+                ckpt_fh.close()
 
         return [r for r in results if r is not None]
 

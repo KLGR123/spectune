@@ -113,7 +113,8 @@ HTML = r"""<!doctype html>
   <div class="chart-card"><h3>Tool Reward Sum (per file)</h3><canvas id="c2"></canvas></div>
   <div class="chart-card"><h3>Tool Failure Rate</h3><canvas id="c3"></canvas></div>
   <div class="chart-card"><h3>nmr_generate Answer Rank (positive-score only)</h3><canvas id="c4"></canvas></div>
-  <div class="chart-card span2"><h3>nmr_generate Tool Accuracy (all trajectories)</h3><canvas id="c5"></canvas></div>
+  <div class="chart-card"><h3>nmr_generate Tool Accuracy (all trajectories)</h3><canvas id="c5"></canvas></div>
+  <div class="chart-card"><h3>Tool Calls per Turn (first query vs. follow-up)</h3><canvas id="c6"></canvas></div>
 </div>
 <script>
 const PALETTE = [
@@ -166,7 +167,7 @@ fetch('/api/stats').then(r => r.json()).then(data => { rawData = data; redraw();
 function redraw() {
   if (!rawData) return;
   const w = parseInt(document.getElementById('smooth').value);
-  const { labels, tool_freq, tool_reward, tool_fail, nmr_ranks, nmr_acc } = rawData;
+  const { labels, tool_freq, tool_reward, tool_fail, nmr_ranks, nmr_acc, turn_tool_counts } = rawData;
   charts.forEach(c => c.destroy());
   charts = [
     mkChart('c1', mkDatasets(tool_freq,   labels, w), labels, 'calls'),
@@ -179,6 +180,7 @@ function redraw() {
       borderWidth: 2, pointRadius: 2, tension: 0.3, spanGaps: true,
     }], labels, 'rank'),
     mkChart('c5', mkDatasets(nmr_acc, labels, w), labels, 'accuracy'),
+    mkChart('c6', mkDatasets(turn_tool_counts, labels, w), labels, 'avg tool calls'),
   ];
 }
 </script>
@@ -216,6 +218,8 @@ def api_stats():
         nr: list[int] = []
         r1: list[int] = []   # rank_1 acc (0/1) for every nmr_generate call
         ra: list[int] = []   # rank_all acc (0/1) for every nmr_generate call
+        tc1: list[int] = []  # tool call count before first follow-up user turn
+        tc2: list[int] = []  # tool call count after first follow-up user turn
 
         with open(path, encoding="utf-8") as fh:
             for line in fh:
@@ -238,7 +242,7 @@ def api_stats():
                     counts[1] += 1
                     if _is_failure(response):
                         counts[0] += 1
-                    if tool_name == "nmr_generate" and score > 0:
+                    if tool_name == "nmr_generate" and score > 0.5:
                         rank = _nmr_rank(response, gts)
                         if rank is not None:
                             nr.append(rank)
@@ -257,7 +261,22 @@ def api_stats():
                         except (json.JSONDecodeError, AttributeError, TypeError):
                             pass
 
-        per_file.append({"fc": fc, "fr": fr, "ff": ff, "nr": nr, "r1": r1, "ra": ra})
+                # Per-turn tool call counts: strip tool_response user wrappers,
+                # then split at the first remaining user turn (follow-up query).
+                cleaned = re.sub(
+                    r"\buser\s*\n\s*(<tool_response>.*?</tool_response>)\s*\nassistant",
+                    r"\1", output, flags=re.DOTALL,
+                )
+                followup = re.search(r"\buser\s*\n", cleaned)
+                if followup:
+                    before_text = cleaned[:followup.start()]
+                    after_text  = cleaned[followup.start():]
+                    tc1.append(len(re.findall(r"<tool_call>", before_text)))
+                    tc2.append(len(re.findall(r"<tool_call>", after_text)))
+                else:
+                    tc1.append(len(re.findall(r"<tool_call>", cleaned)))
+
+        per_file.append({"fc": fc, "fr": fr, "ff": ff, "nr": nr, "r1": r1, "ra": ra, "tc1": tc1, "tc2": tc2})
 
     all_tools = sorted({t for d in per_file for t in d["fc"]})
     tool_freq   = {t: [d["fc"].get(t, 0)   for d in per_file] for t in all_tools}
@@ -277,14 +296,19 @@ def api_stats():
         "rank_1":   [sum(d["r1"]) / len(d["r1"]) if d["r1"] else None for d in per_file],
         "rank_all": [sum(d["ra"]) / len(d["ra"]) if d["ra"] else None for d in per_file],
     }
+    turn_tool_counts = {
+        "first query":  [sum(d["tc1"]) / len(d["tc1"]) if d["tc1"] else None for d in per_file],
+        "follow-up":    [sum(d["tc2"]) / len(d["tc2"]) if d["tc2"] else None for d in per_file],
+    }
 
     return jsonify({
-        "labels":      labels,
-        "tool_freq":   tool_freq,
-        "tool_reward": tool_reward,
-        "tool_fail":   tool_fail,
-        "nmr_ranks":   nmr_ranks,
-        "nmr_acc":     nmr_acc,
+        "labels":           labels,
+        "tool_freq":        tool_freq,
+        "tool_reward":      tool_reward,
+        "tool_fail":        tool_fail,
+        "nmr_ranks":        nmr_ranks,
+        "nmr_acc":          nmr_acc,
+        "turn_tool_counts": turn_tool_counts,
     })
 
 

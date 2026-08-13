@@ -225,20 +225,74 @@ Supervised fine-tuning using rejection-sampled rollouts as training examples.
 
 ### 1. Generate rollout data
 
+#### API mode (hosted endpoint)
+
+Uses `SPECTUNE_LLM_BASE_URL` / `SPECTUNE_LLM_MODEL` from `secrets.env`.
+
 ```bash
 cd /path/to/spectune
 
 python -m spectune.rollout \
     --input   outputs/datasets/nmrexp_sft_2000.jsonl \
-    --output  outputs/datasets/verl/nmrexp_sft_rollout_w_rs_3.parquet \
+    --output  outputs/datasets/verl/nmrexp_sft_rollout_qwen3_max_w_rs_2_topk_15.parquet \
     --format  parquet \
-    --rounds  3 \
-    --temperature 0.6 \
-    --max-tokens 16384 \
-    --nmr-gen-topk 30 \
+    --rounds  2 \
+    --temperature 0.5 \
+    --max-tokens 10000 \
+    --nmr-gen-topk 15 \
     --max-concurrency 8 \
     --model qwen3-max
 ```
+
+#### Local mode (auto vLLM server)
+
+Pass `--local-model` (or set `SPECTUNE_LOCAL_MODEL_PATH` in `secrets.env`) to have
+spectune start a vLLM OpenAI-compatible server automatically, run rollout against it,
+and shut it down when done.  `SPECTUNE_LLM_BASE_URL` / `SPECTUNE_LLM_MODEL` are
+ignored when `--local-model` is active.
+
+`--max-concurrency` controls how many HTTP requests spectune keeps in flight simultaneously,
+and works in both modes.  For local vLLM, this controls how full the vLLM request queue
+is at any time: too low starves vLLM's continuous-batching scheduler (low GPU utilization);
+too high causes memory pressure from a deep queue.  Values in the 4–8 range are a reasonable
+starting point for a single-node setup.
+
+```bash
+# 8-GPU tensor-parallel rollout with Qwen3-32B
+python -m spectune.rollout \
+    --input              outputs/datasets/nmrexp_sft_2000.jsonl \
+    --output             outputs/datasets/verl/nmrexp_sft_rollout_qwen_32b_w_rs_2_topk_15.parquet \
+    --format             parquet \
+    --rounds             2 \
+    --temperature        0.5 \
+    --max-tokens         8000 \
+    --nmr-gen-topk       15 \
+    --max-concurrency    6 \
+    --local-model        /fs_mol/liujiarun/models/qwen3-32b \
+    --tensor-parallel-size 8 \
+    --max-model-len      20000 \
+    --gpu-memory-utilization 0.85
+```
+
+Or set the defaults in `secrets.env` and omit the flags:
+
+```bash
+export SPECTUNE_LOCAL_MODEL_PATH=/fs_mol/liujiarun/models/qwen3-32b
+export SPECTUNE_VLLM_TENSOR_PARALLEL_SIZE=4
+
+python -m spectune.rollout \
+    --input   outputs/datasets/nmrexp_sft_2000.jsonl \
+    --format  parquet \
+    --rounds  3
+```
+
+Key local-vLLM flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--local-model` | `SPECTUNE_LOCAL_MODEL_PATH` | Path to local HuggingFace model directory; triggers auto vLLM server |
+| `--tensor-parallel-size` | `SPECTUNE_VLLM_TENSOR_PARALLEL_SIZE` (or `1`) | Number of GPUs for tensor parallelism |
+| `--vllm-port` | random free port | Fixed TCP port for the vLLM server (useful for debugging) |
 
 This reads the SFT split produced by `python -m spectune.augmentor` and runs a
 hermes **tool-agent loop** per sample: the LLM generates, any `<tool_call>`
