@@ -15,10 +15,9 @@ Both shapes share the same 15 base columns (enforced by :func:`_validate_schema`
 below), so :class:`NmrExpDataLoader` normalizes every configured source into
 one flat record schema (a resolved ``gt_smiles``, the NMR evidence, and
 provenance/QC metadata). The raw export becomes ``truth_train`` while the
-human-checked exports are merged into ``truth_test``. Downstream, each truth
-split will be combined independently with seeds sampled from
-:class:`~spectune.dataloader.specxmaster.SpecXMasterDataLoader`'s ``queries``
-to produce the final train/test datasets.
+human-checked exports are merged into ``truth_test``. Downstream,
+:class:`~spectune.augmentor.Augmentor` reads a truth split and shuffles/slices
+it into the final train/test/sft query datasets.
 """
 
 from __future__ import annotations

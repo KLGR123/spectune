@@ -24,7 +24,7 @@ from .format.v1 import (
     extract_smiles_candidates,
     format_final_answer,
 )
-from .llm import LlmClient, LlmConfig
+from .llm import LitellmClient, LitellmConfig, LlmClient, LlmClientProtocol, LlmConfig, create_llm_client
 from .reward import RewardConfig, RewardEvaluator, RewardResult
 from .rollout import (
     BaseSampler,
@@ -84,7 +84,10 @@ __all__ = [
     "FORMAT_SPEC_VERSION",
     "InMemoryDataset",
     "JsonlDataset",
+    "LitellmClient",
+    "LitellmConfig",
     "LlmClient",
+    "LlmClientProtocol",
     "LlmConfig",
     "NmrExpDataLoader",
     "NmrExpDataLoaderConfig",
@@ -124,6 +127,7 @@ __all__ = [
     "WikipediaSearchTool",
     "compile_jsonl_file",
     "compile_sample",
+    "create_llm_client",
     "extract_smiles_candidates",
     "format_final_answer",
 ]

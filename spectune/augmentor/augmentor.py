@@ -30,7 +30,7 @@ from typing import Any
 
 from spectune.dataloader import Dataset, InMemoryDataset, NmrExpDataLoader, NmrExpDataLoaderConfig
 from spectune.dataloader.base import write_jsonl
-from spectune.llm import LlmClient
+from spectune.llm import LlmClient, LlmClientProtocol
 
 from .config import AugmentorConfig
 from .enrichment import Enricher
@@ -60,7 +60,7 @@ class Augmentor:
         config: AugmentorConfig | None = None,
         *,
         enricher: Enricher | None = None,
-        llm: LlmClient | None = None,
+        llm: LlmClientProtocol | None = None,
         loader: NmrExpDataLoader | None = None,
     ) -> None:
         self.config = config or AugmentorConfig()

@@ -1,4 +1,4 @@
-"""Context-manager wrapper to launch and tear down a local vLLM OpenAI-compatible server."""
+"""Launch and manage a local vLLM OpenAI-compatible server."""
 
 from __future__ import annotations
 

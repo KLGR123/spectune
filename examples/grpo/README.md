@@ -189,6 +189,92 @@ rollout.
 pydantic schema models, which would drop `items` / `minimum` / …). Keep YAML
 entries schema-free (`tool_name` only).
 
+## SFT with Rollout-Filtered Data
+
+Supervised fine-tuning using rejection-sampled rollouts as training examples.
+
+Runs a hermes tool-agent loop per sample via `spectune.rollout`: the LLM generates,
+`<tool_call>` blocks execute for real via `ToolManager`, and generation repeats until
+the model stops calling tools or `--max-assistant-turns` is reached. Each trajectory
+retries up to `--rounds` times, keeping only the first one where the model identifies
+the ground-truth SMILES (GT rejection sampling via `spectune.reward.RewardEvaluator`).
+Each accepted record is a `messages` list ready for verl multiturn SFT.
+
+```bash
+cd /path/to/spectune
+
+# API mode: SPECTUNE_LLM_BASE_URL / SPECTUNE_LLM_MODEL from secrets.env
+python -m spectune.rollout \
+    --input   outputs/datasets/nmrexp_sft_2000.jsonl \
+    --output  outputs/datasets/verl/nmrexp_sft_rollout_qwen3_max_w_rs_2_topk_15.parquet \
+    --format  parquet \
+    --rounds  2 \
+    --temperature 0.5 \
+    --max-tokens 10000 \
+    --nmr-gen-topk 15 \
+    --max-concurrency 8 \
+    --model qwen3-max
+
+# Local mode: pass --local-model (or set SPECTUNE_LOCAL_MODEL_PATH in secrets.env) to
+# have spectune auto-start a vLLM OpenAI-compatible server, run rollout against it, and
+# shut it down when done. SPECTUNE_LLM_BASE_URL / SPECTUNE_LLM_MODEL are ignored here.
+python -m spectune.rollout \
+    --input              outputs/datasets/nmrexp_sft_2000.jsonl \
+    --output             outputs/datasets/verl/nmrexp_sft_rollout_qwen_32b_w_rs_2_topk_15.parquet \
+    --format             parquet \
+    --rounds             2 \
+    --temperature        0.5 \
+    --max-tokens         8000 \
+    --nmr-gen-topk       15 \
+    --max-concurrency    6 \
+    --local-model        /fs_mol/liujiarun/models/qwen3-32b \
+    --tensor-parallel-size 8 \
+    --max-model-len      20000 \
+    --gpu-memory-utilization 0.85
+```
+
+`--max-concurrency` caps in-flight LLM requests in both modes; for local vLLM it also
+sets the request-queue depth (too low starves continuous batching, too high causes
+memory pressure) — 4–8 is a reasonable starting point for a single node.
+
+Key flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input` | *(required)* | nmrexp_sft_*.jsonl from `python -m spectune.augmentor` |
+| `--output` | auto-derived | Destination JSONL or Parquet |
+| `--format` | `jsonl` | Output format (`jsonl` / `parquet`) |
+| `--rounds` | `8` | Max rejection-sampling rounds per sample (k) |
+| `--temperature` | `0.8` | LLM sampling temperature |
+| `--top-p` | `0.95` | Top-p nucleus sampling |
+| `--max-tokens` | `4096` | Max tokens per LLM response |
+| `--nmr-gen-topk` | `10` | Default `topk` for `nmr_generate` candidate generation (max `50`) |
+| `--tools` | `DEFAULT_RL_TOOL_NAMES` | Tool names exposed to the model |
+| `--max-assistant-turns` | `16` | Max LLM generations per agent loop (matches verl `multi_turn.max_assistant_turns`) |
+| `--max-concurrency` | `8` | Max concurrent LLM requests |
+| `--model` | `SPECTUNE_LLM_MODEL` env | Override LLM model name (e.g. `GPT-5.4`) |
+| `--local-model` | `SPECTUNE_LOCAL_MODEL_PATH` | Path to local HuggingFace model directory; triggers auto vLLM server |
+| `--tensor-parallel-size` | `SPECTUNE_VLLM_TENSOR_PARALLEL_SIZE` (or `1`) | GPUs for tensor parallelism (local mode) |
+| `--vllm-port` | random free port | Fixed TCP port for the vLLM server (local mode, useful for debugging) |
+| `--no-progress` | off | Suppress tqdm progress bar |
+
+LLM endpoint is read from `SPECTUNE_LLM_BASE_URL`, `SPECTUNE_LLM_MODEL`, and
+`SPECTUNE_LLM_API_KEY` (see `secrets.env.example`).
+
+Then Launch SFT.
+
+```bash
+bash examples/grpo/run_sft.sh
+```
+
+Calls `verl.trainer.fsdp_sft_trainer` via `torchrun` with multiturn mode enabled
+(`data.multiturn.messages_key=messages`). Key overrides:
+
+- `data.multiturn.enable=true` — treat each row's `messages` list as a full conversation
+- `data.max_length=8192` — covers tool-call traces
+- `model.partial_pretrain` — base model path (default: `qwen3-8b`)
+- `trainer.total_epochs=3` — adjust to dataset size
+
 ## Point verl at Spectune reward + tools
 
 ```bash
@@ -219,131 +305,22 @@ python scripts/legacy_model_merger.py merge \
     --target_dir /path/to/checkpoints/spectune/grpo-nmrexp-20k-qwen3-4b-base/global_step_500/actor/huggingface
 ```
 
-## SFT with Rollout-Filtered Data
+## Visualise rollout trajectories
 
-Supervised fine-tuning using rejection-sampled rollouts as training examples.
+Two viewers are available; use different ports to run them side-by-side:
 
-### 1. Generate rollout data
-
-#### API mode (hosted endpoint)
-
-Uses `SPECTUNE_LLM_BASE_URL` / `SPECTUNE_LLM_MODEL` from `secrets.env`.
+| Viewer | Script | Default port | Data source |
+|--------|--------|-------------|-------------|
+| GRPO rollout (JSONL dir) | `examples/debug/traj_rl.py` | 7860 | `outputs/trajectories/` |
+| SFT rollout (Parquet) | `examples/debug/traj_sft.py` | 7861 | `outputs/datasets/verl/*.parquet` |
 
 ```bash
+# Start all three viewers at once (ports 7860 / 7861 / 7862)
 cd /path/to/spectune
+bash examples/debug/visualize.sh
 
-python -m spectune.rollout \
-    --input   outputs/datasets/nmrexp_sft_2000.jsonl \
-    --output  outputs/datasets/verl/nmrexp_sft_rollout_qwen3_max_w_rs_2_topk_15.parquet \
-    --format  parquet \
-    --rounds  2 \
-    --temperature 0.5 \
-    --max-tokens 10000 \
-    --nmr-gen-topk 15 \
-    --max-concurrency 8 \
-    --model qwen3-max
+# Override the rollout parquet file or ports via env vars
+ROLLOUT_PARQUET=outputs/datasets/verl/nmrexp_sft_rollout_qwen3_max_w_rs_2_topk_15.parquet \
+PORT_ROLLOUT=7862 \
+bash examples/debug/visualize.sh
 ```
-
-#### Local mode (auto vLLM server)
-
-Pass `--local-model` (or set `SPECTUNE_LOCAL_MODEL_PATH` in `secrets.env`) to have
-spectune start a vLLM OpenAI-compatible server automatically, run rollout against it,
-and shut it down when done.  `SPECTUNE_LLM_BASE_URL` / `SPECTUNE_LLM_MODEL` are
-ignored when `--local-model` is active.
-
-`--max-concurrency` controls how many HTTP requests spectune keeps in flight simultaneously,
-and works in both modes.  For local vLLM, this controls how full the vLLM request queue
-is at any time: too low starves vLLM's continuous-batching scheduler (low GPU utilization);
-too high causes memory pressure from a deep queue.  Values in the 4–8 range are a reasonable
-starting point for a single-node setup.
-
-```bash
-# 8-GPU tensor-parallel rollout with Qwen3-32B
-python -m spectune.rollout \
-    --input              outputs/datasets/nmrexp_sft_2000.jsonl \
-    --output             outputs/datasets/verl/nmrexp_sft_rollout_qwen_32b_w_rs_2_topk_15.parquet \
-    --format             parquet \
-    --rounds             2 \
-    --temperature        0.5 \
-    --max-tokens         8000 \
-    --nmr-gen-topk       15 \
-    --max-concurrency    6 \
-    --local-model        /fs_mol/liujiarun/models/qwen3-32b \
-    --tensor-parallel-size 8 \
-    --max-model-len      20000 \
-    --gpu-memory-utilization 0.85
-```
-
-Or set the defaults in `secrets.env` and omit the flags:
-
-```bash
-export SPECTUNE_LOCAL_MODEL_PATH=/fs_mol/liujiarun/models/qwen3-32b
-export SPECTUNE_VLLM_TENSOR_PARALLEL_SIZE=4
-
-python -m spectune.rollout \
-    --input   outputs/datasets/nmrexp_sft_2000.jsonl \
-    --format  parquet \
-    --rounds  3
-```
-
-Key local-vLLM flags:
-
-| Flag | Default | Description |
-|---|---|---|
-| `--local-model` | `SPECTUNE_LOCAL_MODEL_PATH` | Path to local HuggingFace model directory; triggers auto vLLM server |
-| `--tensor-parallel-size` | `SPECTUNE_VLLM_TENSOR_PARALLEL_SIZE` (or `1`) | Number of GPUs for tensor parallelism |
-| `--vllm-port` | random free port | Fixed TCP port for the vLLM server (useful for debugging) |
-
-This reads the SFT split produced by `python -m spectune.augmentor` and runs a
-hermes **tool-agent loop** per sample: the LLM generates, any `<tool_call>`
-blocks are executed for real via `ToolManager` (results fed back as
-`<tool_response>` turns), and generation repeats until the model stops calling
-tools or `--max-assistant-turns` is reached.  The whole trajectory is retried up
-to `--rounds` times, keeping only the first one where the model correctly
-identifies the ground-truth SMILES (GT rejection sampling via
-`spectune.reward.RewardEvaluator`).  Each accepted record contains a `messages`
-list — `[system, user, ..., assistant]` — ready for verl multiturn SFT.
-
-Key flags:
-
-| Flag | Default | Description |
-|---|---|---|
-| `--input` | *(required)* | nmrexp_sft_*.jsonl from `python -m spectune.augmentor` |
-| `--output` | auto-derived | Destination JSONL or Parquet |
-| `--format` | `jsonl` | Output format (`jsonl` / `parquet`) |
-| `--rounds` | `8` | Max rejection-sampling rounds per sample (k) |
-| `--temperature` | `0.8` | LLM sampling temperature |
-| `--top-p` | `0.95` | Top-p nucleus sampling |
-| `--max-tokens` | `4096` | Max tokens per LLM response |
-| `--nmr-gen-topk` | `10` | Default `topk` for `nmr_generate` candidate generation (max `50`) |
-| `--tools` | `DEFAULT_RL_TOOL_NAMES` | Tool names exposed to the model |
-| `--max-assistant-turns` | `16` | Max LLM generations per agent loop (matches verl `multi_turn.max_assistant_turns`) |
-| `--max-concurrency` | `8` | Max concurrent LLM requests |
-| `--model` | `SPECTUNE_LLM_MODEL` env | Override LLM model name (e.g. `GPT-5.4`) |
-| `--no-progress` | off | Suppress tqdm progress bar |
-
-LLM endpoint is read from `SPECTUNE_LLM_BASE_URL`, `SPECTUNE_LLM_MODEL`, and
-`SPECTUNE_LLM_API_KEY` (see `secrets.env.example`).
-
-### 2. Compile a validation file (if not already done)
-
-```bash
-python -m spectune.artifacts compile \
-    --input  outputs/datasets/nmrexp_test_200.jsonl \
-    --output outputs/datasets/verl/test.parquet \
-    --split  test
-```
-
-### 3. Launch SFT
-
-```bash
-bash examples/grpo/run_sft.sh
-```
-
-The script calls `verl.trainer.fsdp_sft_trainer` via `torchrun` with multiturn
-mode enabled (`data.multiturn.messages_key=messages`).  Key overrides:
-
-- `data.multiturn.enable=true` — treat each row's `messages` list as a full conversation
-- `data.max_length=8192` — covers tool-call traces
-- `model.partial_pretrain` — base model path (default: `qwen3-8b`)
-- `trainer.total_epochs=3` — adjust to dataset size

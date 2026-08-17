@@ -14,6 +14,7 @@ export TRAIN_FILE=$SPECTUNE_ROOT/outputs/datasets/verl/nmrexp_sft_rollout.parque
 export VAL_FILE=$SPECTUNE_ROOT/outputs/datasets/verl/test.parquet
 export MODEL_PATH=/fs_mol/liujiarun/models/qwen3-8b
 export SAVE_PATH=$SPECTUNE_ROOT/outputs/checkpoints/$PROJECT_NAME/$EXPERIMENT_NAME
+export TENSORBOARD_DIR=$SPECTUNE_ROOT/outputs/tensorboard/$PROJECT_NAME/$EXPERIMENT_NAME
 
 cd "${VERL_ROOT}"
 
@@ -22,13 +23,14 @@ torchrun --standalone \
     --nproc_per_node="${NDEVICES_PER_NODE}" \
     -m verl.trainer.fsdp_sft_trainer \
     data.train_files="${TRAIN_FILE}" \
-    data.val_files="${VAL_FILE}" \
+    data.val_files="${TRAIN_FILE}" \
+    data.val_max_samples=500 \
     data.multiturn.enable=true \
     data.multiturn.messages_key=messages \
     data.micro_batch_size_per_gpu=2 \
     data.max_length=16384 \
     model.partial_pretrain="${MODEL_PATH}" \
-    model.use_remove_padding=True \
+    use_remove_padding=True \
     model.enable_gradient_checkpointing=True \
     optim.lr=2e-5 \
     trainer.default_local_dir="${SAVE_PATH}" \
@@ -36,4 +38,7 @@ torchrun --standalone \
     trainer.experiment_name="${EXPERIMENT_NAME}" \
     trainer.total_epochs=2 \
     trainer.save_freq=200 \
-    trainer.logger='["console","tensorboard"]'
+    trainer.logger='["console","tensorboard"]'\
+    model.strategy=fsdp \
+    model.fsdp_config.cpu_offload=True \
+    model.fsdp_config.offload_params=True \

@@ -15,7 +15,7 @@ from spectune.format.v1 import (
     extract_tool_calls,
     format_tools_block,
 )
-from spectune.llm import LlmClient, LlmConfig
+from spectune.llm import LlmClient, LlmClientProtocol, LlmConfig
 from spectune.tools import (
     DEFAULT_RL_TOOL_NAMES,
     ToolManager,
@@ -85,9 +85,19 @@ class Rollout:
         self,
         config: RolloutConfig | None = None,
         llm_config: LlmConfig | None = None,
+        *,
+        llm: LlmClientProtocol | None = None,
     ) -> None:
+        """``llm``, if given, is used as-is -- pass a pre-built
+        :class:`~spectune.llm.litellm.LitellmClient` (or any other object
+        satisfying :class:`~spectune.llm.base.LlmClientProtocol`) to swap
+        backends without editing this module. Its config is assumed to
+        already carry the desired sampling params; ``config``'s
+        ``temperature``/``top_p``/``max_tokens``/``max_concurrency`` are only
+        applied to the default :class:`LlmClient` path.
+        """
         self.config = config or RolloutConfig()
-        self.llm = LlmClient(
+        self.llm = llm or LlmClient(
             dataclasses.replace(
                 llm_config or LlmConfig(),
                 temperature=self.config.temperature,

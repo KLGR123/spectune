@@ -16,10 +16,9 @@ pip install -e ".[dev,data,classifier]"       # + sklearn/RDKit/transformers/tor
 ```
 
 
-
 ## Credentials
 
-Most tools work with no configuration beyond what's listed here; unset URLs/keys make the corresponding tool report `status="unavailable"` rather than failing.
+See `secrets.env.example`. 
 
 ```bash
 export VOLCENGINE_WEBSEARCH_API_KEY=<key>   # web_search
@@ -29,27 +28,19 @@ export NMR_REPAIR_API_URL=<url>             # nmr_repair
 export NMR_RANK_API_URL=<url>               # nmr_rerank
 export NMR_PREDICT_MCP_URL=<url>            # nmr_forward_predict (needs `pip install spectune[mcp]`)
 export NMREXP_SEARCH_MCP_BASE_URL=<url>     # nmrexp_search
-...
-```
 
-See `secrets.env.example`. 
-
-```
 source secrets.env
 ```
+
 
 ## Tests
 
 ```bash
 cd spectune
 source secrets.env
-pytest -v                                   # all tests; real-API tests skip if creds/config absent
-pytest -v tests/test_augmentor.py           # augmentor; rdkit/LLM-dependent tests skip if unavailable
-pytest -v tests/test_external_tools.py      # external calls (requires credentials/config above)
-pytest tests/test_external_tools.py -s -m external
-SPECTUNE_ENABLE_NETWORK_TESTS=1 pytest -v tests/test_external_tools.py  # + credential-free public APIs
-pytest -v tests/test_dataloader_base.py tests/test_nmrexp_dataloader.py tests/test_specxmaster_dataloader.py  # dataloader only; NMRexp tests skip if pandas/pyarrow absent
-pytest -v tests/test_classifier.py           # classifier; optional-dependency tests skip if unavailable
+pytest -v                                 # all tests; real-API tests skip if creds/config absent
+pytest -v tests/test_external_tools.py    # external calls (requires credentials/config above)
+pytest -q -m "not external"
 ```
 
 ## Training Related
@@ -58,7 +49,7 @@ pytest -v tests/test_classifier.py           # classifier; optional-dependency t
 tensorboard --logdir /path/to/tb --port 6006 --bind_all
 ssh -L 6006:localhost:6006 user@server
 tmux new -s spectune
-# tmux attach -t spectune
+tmux attach -t spectune
 tail -f /tmp/ray/session_latest/logs/worker-*.out | grep "tool-call\|tool-result" # with export SPECTUNE_TOOL_LOG=1
 ```
 

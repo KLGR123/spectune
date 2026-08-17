@@ -245,3 +245,51 @@ def test_reward_config_requires_component_weights_to_sum_to_one():
                 "tool_call_count": 0.1,
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "exc_type", "match"),
+    [
+        ({"gt_match_reward": -0.1}, ValueError, "non-negative"),
+        ({"rank_discount": -0.1}, ValueError, "between 0 and 1"),
+        ({"rank_discount": 1.1}, ValueError, "between 0 and 1"),
+        ({"invalid_tool_call_penalty": 0.1}, ValueError, "non-positive"),
+        ({"invalid_smiles_penalty": 0.1}, ValueError, "non-positive"),
+        ({"max_tool_calls": -1}, ValueError, "non-negative or None"),
+        ({"excess_tool_call_penalty": 0.1}, ValueError, "non-positive"),
+        ({"component_weights": ["not", "a", "mapping"]}, TypeError, "must be a mapping"),
+        (
+            {"component_weights": {"gt_smiles": 0.7, "tool_call_format": 0.1, "smiles_validity": 0.2}},
+            ValueError,
+            "missing",
+        ),
+        (
+            {
+                "component_weights": {
+                    "gt_smiles": 0.7,
+                    "tool_call_format": 0.1,
+                    "smiles_validity": 0.1,
+                    "tool_call_count": 0.05,
+                    "unexpected": 0.05,
+                }
+            },
+            ValueError,
+            "unknown",
+        ),
+        (
+            {
+                "component_weights": {
+                    "gt_smiles": -0.1,
+                    "tool_call_format": 0.4,
+                    "smiles_validity": 0.4,
+                    "tool_call_count": 0.3,
+                }
+            },
+            ValueError,
+            "non-negative",
+        ),
+    ],
+)
+def test_reward_config_rejects_invalid_values(kwargs, exc_type, match):
+    with pytest.raises(exc_type, match=match):
+        RewardConfig(**kwargs)

@@ -5,7 +5,7 @@ set -xeuo pipefail
 NNODES=1
 NDEVICES_PER_NODE=8
 PROJECT_NAME=spectune
-EXPERIMENT_NAME=grpo-nmrexp-20k-qwen3-8b-base-test
+EXPERIMENT_NAME=grpo-nmrexp-20k-qwen3-8b-base
 
 # fill in the following paths
 export SPECTUNE_ROOT=/fs_mol/liujiarun/spectune

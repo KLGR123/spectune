@@ -74,6 +74,34 @@ class TestNmrClassifier:
             assert image.info["dpi"][0] >= 399
 
 
+class TestClassifierConfigValidation:
+    @pytest.mark.parametrize(
+        "field_name",
+        [
+            "nmr_n_clusters",
+            "batch_size",
+            "kmeans_epochs",
+            "visualization_dpi",
+            "visualization_max_points",
+            "fingerprint_radius",
+            "fingerprint_bits",
+            "nmr_num_workers",
+            "nmr_worker_chunk_size",
+        ],
+    )
+    def test_rejects_non_positive_values(self, field_name):
+        with pytest.raises(ValueError, match="must be positive"):
+            ClassifierConfig(**{field_name: 0})
+
+    def test_rejects_negative_property_weight(self):
+        with pytest.raises(ValueError, match="non-negative"):
+            ClassifierConfig(property_weight=-0.1)
+
+    def test_rejects_invalid_visualization_dim(self):
+        with pytest.raises(ValueError, match="2 or 3"):
+            ClassifierConfig(visualization_dim=4)
+
+
 class TestClassifierValidation:
     def test_requires_jsonl_dataset(self):
         classifier = Classifier(ClassifierConfig(visualize=False))

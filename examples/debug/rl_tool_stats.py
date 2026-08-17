@@ -12,10 +12,6 @@ app = Flask(__name__)
 TRAJ_DIR: Path = DEFAULT_TRAJ_DIR
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def _parse_tool_segments(raw: str) -> list[tuple[str, str]]:
     """Return [(tool_name, response_content), ...] for each tool call in output."""
     cleaned = re.sub(
@@ -64,10 +60,6 @@ def _nmr_rank(response: str, gts: str) -> int | None:
         pass
     return None
 
-
-# ---------------------------------------------------------------------------
-# HTML
-# ---------------------------------------------------------------------------
 
 HTML = r"""<!doctype html>
 <html lang="zh">
@@ -188,10 +180,6 @@ function redraw() {
 </html>
 """
 
-
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
 
 @app.route("/")
 def index():

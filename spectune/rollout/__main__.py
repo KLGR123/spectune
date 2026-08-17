@@ -10,7 +10,7 @@ import os
 import sys
 from pathlib import Path
 
-from spectune.llm import LlmConfig
+from spectune.llm import BACKENDS, LlmConfig, create_llm_client, vllm_server
 from spectune.tools.config import NMR_GENERATE_MAX_TOPK
 
 from .config import DEFAULT_MAX_ASSISTANT_TURNS, DEFAULT_OUTPUT_DIR, RolloutConfig
@@ -170,7 +170,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         metavar="NAME",
         default=None,
-        help="LLM model name to use (e.g. GPT-5.4).  Defaults to SPECTUNE_LLM_MODEL from the environment.",
+        help=(
+            "LLM model name to use (e.g. GPT-5.4).  Defaults to SPECTUNE_LLM_MODEL "
+            "(or LITELLM_MODEL when --backend litellm) from the environment."
+        ),
+    )
+    p.add_argument(
+        "--backend",
+        choices=BACKENDS,
+        default=os.getenv("SPECTUNE_LLM_BACKEND", "http"),
+        help=(
+            "Chat-completion backend: 'http' talks directly to SPECTUNE_LLM_BASE_URL, "
+            "'litellm' routes through litellm using LITELLM_API_KEY/LITELLM_API_BASE/"
+            "LITELLM_MODEL from secrets.env.  Defaults to SPECTUNE_LLM_BACKEND env var, "
+            "then 'http'.  Ignored when --local-model is set."
+        ),
     )
 
     # local vLLM options
@@ -285,8 +299,6 @@ def main(argv: list[str] | None = None) -> None:
     sampler = GtRejectionSampler() if args.rounds is not None else None
 
     if args.local_model and not args.model:
-        from ._vllm import vllm_server
-
         vllm_extra: list[str] = []
         if args.max_model_len is not None:
             vllm_extra += ["--max-model-len", str(args.max_model_len)]
@@ -302,6 +314,25 @@ def main(argv: list[str] | None = None) -> None:
             llm_config = LlmConfig(base_url=base_url, model=model_name)
             rollout = Rollout(config, llm_config)
             records = asyncio.run(rollout.run(samples, sampler, checkpoint_path=ckpt_path if use_checkpoint else None))
+    elif args.backend == "litellm":
+        overrides: dict[str, object] = {
+            "temperature": config.temperature,
+            "top_p": config.top_p,
+            "max_tokens": config.max_tokens,
+            "max_concurrency": config.max_concurrency,
+        }
+        if args.model:
+            overrides["model"] = args.model
+        llm = create_llm_client("litellm", **overrides)
+        if not llm.available:
+            print(
+                "error: litellm endpoint not configured — set LITELLM_API_KEY, "
+                "LITELLM_API_BASE, and LITELLM_MODEL (see secrets.env.example)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        rollout = Rollout(config, llm=llm)
+        records = asyncio.run(rollout.run(samples, sampler, checkpoint_path=ckpt_path if use_checkpoint else None))
     else:
         llm_config = LlmConfig()
         if args.model:
