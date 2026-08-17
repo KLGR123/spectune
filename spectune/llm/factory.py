@@ -7,6 +7,9 @@ Set ``SPECTUNE_LLM_BACKEND`` in the environment (typically via
   ``SPECTUNE_LLM_BASE_URL`` / ``SPECTUNE_LLM_MODEL``.
 - ``"litellm"`` -- :class:`~spectune.llm.litellm.LitellmClient` against
   ``LITELLM_API_BASE`` / ``LITELLM_MODEL``.
+- ``"local"`` -- auto-starts a local vLLM server using
+  ``SPECTUNE_LLM_MODEL`` as the model path; handled in the CLI layer,
+  not by this factory (calling ``create_llm_client("local")`` raises).
 
 :class:`~spectune.rollout.rollout.Rollout` and
 :class:`~spectune.augmentor.augmentor.Augmentor` both accept a pre-built
@@ -25,7 +28,7 @@ from .config import LitellmConfig, LlmConfig
 from .litellm import LitellmClient
 from .llm import LlmClient
 
-BACKENDS = ("http", "litellm")
+BACKENDS = ("http", "local", "litellm")
 
 
 def create_llm_client(backend: str | None = None, **overrides: object) -> LlmClientProtocol:
@@ -35,6 +38,9 @@ def create_llm_client(backend: str | None = None, **overrides: object) -> LlmCli
     :func:`dataclasses.replace` -- e.g. ``temperature=0.2, max_concurrency=4``.
     Passing a field the selected config doesn't have raises ``TypeError``,
     same as constructing the dataclass directly.
+
+    Note: ``"local"`` is handled at the CLI layer (it auto-starts a vLLM
+    server); calling this function with ``"local"`` raises ``ValueError``.
     """
     resolved = (backend or os.getenv("SPECTUNE_LLM_BACKEND") or "http").strip().lower()
     if resolved == "litellm":
@@ -43,6 +49,12 @@ def create_llm_client(backend: str | None = None, **overrides: object) -> LlmCli
     if resolved == "http":
         config = dataclasses.replace(LlmConfig(), **overrides) if overrides else LlmConfig()
         return LlmClient(config)
+    if resolved == "local":
+        raise ValueError(
+            "backend 'local' auto-starts a vLLM server and is handled by the CLI; "
+            "build an LlmClient manually after starting the server, or use --backend local "
+            "with python -m spectune.rollout"
+        )
     raise ValueError(f"unknown SPECTUNE_LLM_BACKEND {resolved!r}; expected one of {BACKENDS}")
 
 

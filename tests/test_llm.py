@@ -204,6 +204,14 @@ class TestCreateLlmClient:
         assert client.config.temperature == 0.1
         assert client.config.max_concurrency == 4
 
+    def test_backend_local_raises_with_helpful_message(self):
+        try:
+            create_llm_client("local")
+            assert False, "should have raised"
+        except ValueError as exc:
+            assert "local" in str(exc).lower()
+            assert "cli" in str(exc).lower() or "vllm" in str(exc).lower()
+
     def test_invalid_backend_raises(self):
         try:
             create_llm_client("unknown")

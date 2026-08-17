@@ -167,43 +167,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Max concurrent LLM requests (default: 8).",
     )
     p.add_argument(
-        "--model",
-        metavar="NAME",
-        default=None,
-        help=(
-            "LLM model name to use (e.g. GPT-5.4).  Defaults to SPECTUNE_LLM_MODEL "
-            "(or LITELLM_MODEL when --backend litellm) from the environment."
-        ),
-    )
-    p.add_argument(
         "--backend",
         choices=BACKENDS,
         default=os.getenv("SPECTUNE_LLM_BACKEND", "http"),
         help=(
-            "Chat-completion backend: 'http' talks directly to SPECTUNE_LLM_BASE_URL, "
-            "'litellm' routes through litellm using LITELLM_API_KEY/LITELLM_API_BASE/"
-            "LITELLM_MODEL from secrets.env.  Defaults to SPECTUNE_LLM_BACKEND env var, "
-            "then 'http'.  Ignored when --local-model is set."
+            "LLM backend: 'http' talks directly to SPECTUNE_LLM_BASE_URL (default), "
+            "'litellm' routes through litellm using LITELLM_API_KEY/LITELLM_API_BASE, "
+            "'local' auto-starts a vLLM server using --model as the model path.  "
+            "Defaults to SPECTUNE_LLM_BACKEND env var, then 'http'."
+        ),
+    )
+    p.add_argument(
+        "--model",
+        metavar="NAME_OR_PATH",
+        default=None,
+        help=(
+            "Model name or path.  "
+            "For 'http': overrides SPECTUNE_LLM_MODEL (e.g. 'qwen3-max').  "
+            "For 'litellm': overrides LITELLM_MODEL (e.g. 'openai/gpt-4o').  "
+            "For 'local': path to a HuggingFace model directory "
+            "(e.g. /fs_mol/liujiarun/models/qwen3-32b); "
+            "falls back to SPECTUNE_LLM_MODEL env var."
         ),
     )
 
     # local vLLM options
-    
     local_group = p.add_argument_group(
-        "local vLLM",
-        "Launch a local vLLM server instead of using a hosted API endpoint.\n"
-        "Set SPECTUNE_LOCAL_MODEL_PATH in secrets.env to make these the defaults.",
-    )
-    local_group.add_argument(
-        "--local-model",
-        metavar="PATH",
-        default=os.getenv("SPECTUNE_LOCAL_MODEL_PATH", ""),
-        help=(
-            "Path to a local HuggingFace model directory (e.g. /fs_mol/liujiarun/models/qwen3-32b).  "
-            "When set, spectune starts a vLLM server automatically on a free port and uses it for "
-            "rollout; SPECTUNE_LLM_BASE_URL / SPECTUNE_LLM_MODEL are ignored.  "
-            "Defaults to SPECTUNE_LOCAL_MODEL_PATH env var."
-        ),
+        "local vLLM (--backend local)",
+        "Options for the auto-started vLLM server when --backend local is used.",
     )
     local_group.add_argument(
         "--tensor-parallel-size",
@@ -298,15 +289,21 @@ def main(argv: list[str] | None = None) -> None:
 
     sampler = GtRejectionSampler() if args.rounds is not None else None
 
-    if args.local_model and not args.model:
+    if args.backend == "local":
+        model_path = args.model or os.getenv("SPECTUNE_LLM_MODEL", "")
+        if not model_path:
+            print(
+                "error: --backend local requires --model <path> or SPECTUNE_LLM_MODEL env var",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         vllm_extra: list[str] = []
         if args.max_model_len is not None:
             vllm_extra += ["--max-model-len", str(args.max_model_len)]
         if args.gpu_memory_utilization is not None:
             vllm_extra += ["--gpu-memory-utilization", str(args.gpu_memory_utilization)]
-
         with vllm_server(
-            args.local_model,
+            model_path,
             tensor_parallel_size=args.tensor_parallel_size,
             port=args.vllm_port,
             extra_args=vllm_extra or None,
@@ -340,7 +337,8 @@ def main(argv: list[str] | None = None) -> None:
         if not llm_config.available:
             print(
                 "error: LLM endpoint not configured — set SPECTUNE_LLM_BASE_URL and "
-                "SPECTUNE_LLM_MODEL, or pass --local-model (see secrets.env.example)",
+                "SPECTUNE_LLM_MODEL, or use --backend local with --model <path> "
+                "(see secrets.env.example)",
                 file=sys.stderr,
             )
             sys.exit(1)

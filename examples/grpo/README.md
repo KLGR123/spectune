@@ -200,40 +200,65 @@ retries up to `--rounds` times, keeping only the first one where the model ident
 the ground-truth SMILES (GT rejection sampling via `spectune.reward.RewardEvaluator`).
 Each accepted record is a `messages` list ready for verl multiturn SFT.
 
+Progress is checkpointed incrementally to `<output>.checkpoint.jsonl`; a crashed run
+resumes automatically from where it left off on the next invocation.  Pass
+`--no-checkpoint` to disable.
+
+Three backends are supported. HTTP mode.
+
 ```bash
 cd /path/to/spectune
 
-# API mode: SPECTUNE_LLM_BASE_URL / SPECTUNE_LLM_MODEL from secrets.env
+export SPECTUNE_LLM_BASE_URL=http://your-api-host/v1
+export SPECTUNE_LLM_MODEL=qwen3-max
+
 python -m spectune.rollout \
-    --input   outputs/datasets/nmrexp_sft_2000.jsonl \
-    --output  outputs/datasets/verl/nmrexp_sft_rollout_qwen3_max_w_rs_2_topk_15.parquet \
-    --format  parquet \
-    --rounds  2 \
-    --temperature 0.5 \
-    --max-tokens 10000 \
+    --input        outputs/datasets/nmrexp_sft_2000.jsonl \
+    --output       outputs/datasets/verl/nmrexp_sft_rollout_qwen3_max_w_rs_2_topk_15.parquet \
+    --format       parquet \
+    --rounds       2 \
+    --temperature  0.5 \
+    --max-tokens   10000 \
+    --nmr-gen-topk 15 \
+    --max-concurrency 8
+```
+
+litellm mode.
+
+```bash
+python -m spectune.rollout \
+    --backend      litellm \
+    --input        outputs/datasets/nmrexp_sft_2000.jsonl \
+    --output       outputs/datasets/verl/nmrexp_sft_rollout_qwen3_max_w_rs_2_topk_15.parquet \
+    --format       parquet \
+    --rounds       2 \
+    --temperature  0.5 \
+    --max-tokens   10000 \
     --nmr-gen-topk 15 \
     --max-concurrency 8 \
-    --model qwen3-max
+    --model        openai/gpt-4o
+```
 
-# Local mode: pass --local-model (or set SPECTUNE_LOCAL_MODEL_PATH in secrets.env) to
-# have spectune auto-start a vLLM OpenAI-compatible server, run rollout against it, and
-# shut it down when done. SPECTUNE_LLM_BASE_URL / SPECTUNE_LLM_MODEL are ignored here.
+Local vLLM mode.
+
+```bash
 python -m spectune.rollout \
-    --input              outputs/datasets/nmrexp_sft_2000.jsonl \
-    --output             outputs/datasets/verl/nmrexp_sft_rollout_qwen_32b_w_rs_2_topk_15.parquet \
-    --format             parquet \
-    --rounds             2 \
-    --temperature        0.5 \
-    --max-tokens         8000 \
-    --nmr-gen-topk       15 \
-    --max-concurrency    6 \
-    --local-model        /fs_mol/liujiarun/models/qwen3-32b \
-    --tensor-parallel-size 8 \
-    --max-model-len      20000 \
+    --backend                local \
+    --model                  /fs_mol/liujiarun/models/qwen3-32b \
+    --input                  outputs/datasets/nmrexp_sft_2000.jsonl \
+    --output                 outputs/datasets/verl/nmrexp_sft_rollout_qwen_32b_w_rs_2_topk_15.parquet \
+    --format                 parquet \
+    --rounds                 2 \
+    --temperature            0.5 \
+    --max-tokens             8000 \
+    --nmr-gen-topk           15 \
+    --max-concurrency        6 \
+    --tensor-parallel-size   8 \
+    --max-model-len          20000 \
     --gpu-memory-utilization 0.85
 ```
 
-`--max-concurrency` caps in-flight LLM requests in both modes; for local vLLM it also
+`--max-concurrency` caps in-flight LLM requests in all modes; for local vLLM it also
 sets the request-queue depth (too low starves continuous batching, too high causes
 memory pressure) — 4–8 is a reasonable starting point for a single node.
 
@@ -244,7 +269,7 @@ Key flags:
 | `--input` | *(required)* | nmrexp_sft_*.jsonl from `python -m spectune.augmentor` |
 | `--output` | auto-derived | Destination JSONL or Parquet |
 | `--format` | `jsonl` | Output format (`jsonl` / `parquet`) |
-| `--rounds` | `8` | Max rejection-sampling rounds per sample (k) |
+| `--rounds` | `None` (no RS) | Max rejection-sampling rounds per sample; omit to accept every trajectory unconditionally |
 | `--temperature` | `0.8` | LLM sampling temperature |
 | `--top-p` | `0.95` | Top-p nucleus sampling |
 | `--max-tokens` | `4096` | Max tokens per LLM response |
@@ -252,14 +277,19 @@ Key flags:
 | `--tools` | `DEFAULT_RL_TOOL_NAMES` | Tool names exposed to the model |
 | `--max-assistant-turns` | `16` | Max LLM generations per agent loop (matches verl `multi_turn.max_assistant_turns`) |
 | `--max-concurrency` | `8` | Max concurrent LLM requests |
-| `--model` | `SPECTUNE_LLM_MODEL` env | Override LLM model name (e.g. `GPT-5.4`) |
-| `--local-model` | `SPECTUNE_LOCAL_MODEL_PATH` | Path to local HuggingFace model directory; triggers auto vLLM server |
-| `--tensor-parallel-size` | `SPECTUNE_VLLM_TENSOR_PARALLEL_SIZE` (or `1`) | GPUs for tensor parallelism (local mode) |
-| `--vllm-port` | random free port | Fixed TCP port for the vLLM server (local mode, useful for debugging) |
-| `--no-progress` | off | Suppress tqdm progress bar |
+| `--backend` | `http` | LLM backend: `http` (direct OpenAI-compatible), `litellm` (100+ providers), or `local` (auto-starts vLLM) |
+| `--model` | env var | Model name or path; for `http` reads `SPECTUNE_LLM_MODEL`, for `litellm` reads `LITELLM_MODEL`, for `local` is the HuggingFace model directory path |
+| `--tensor-parallel-size` | `SPECTUNE_VLLM_TENSOR_PARALLEL_SIZE` (or `1`) | GPUs for tensor parallelism (`--backend local` only) |
+| `--vllm-port` | random free port | Fixed TCP port for the vLLM server (`--backend local` only, useful for debugging) |
+| `--max-model-len` | model config | KV-cache sequence length cap passed to vLLM; set equal to `--max-tokens` to avoid OOM during CUDA graph capture (`--backend local` only) |
+| `--gpu-memory-utilization` | `0.90` | Fraction of GPU memory vLLM may use; lower to `0.85` to leave headroom (`--backend local` only) |
+| `--no-checkpoint` | off | Disable incremental checkpoint saves (enabled by default) |
+| `--no-progress` | off | Suppress per-sample progress output |
 
-LLM endpoint is read from `SPECTUNE_LLM_BASE_URL`, `SPECTUNE_LLM_MODEL`, and
-`SPECTUNE_LLM_API_KEY` (see `secrets.env.example`).
+HTTP endpoint env vars: `SPECTUNE_LLM_BASE_URL`, `SPECTUNE_LLM_MODEL`, `SPECTUNE_LLM_API_KEY`.  
+litellm env vars: `LITELLM_API_BASE`, `LITELLM_MODEL`, `LITELLM_API_KEY`.  
+local backend: `--model` (required) or `SPECTUNE_LLM_MODEL`; `SPECTUNE_VLLM_TENSOR_PARALLEL_SIZE` for GPU count.  
+(See `secrets.env.example` for the full list.)
 
 Then Launch SFT.
 

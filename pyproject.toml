@@ -18,6 +18,7 @@ mcp = ["fastmcp"]
 reaction = ["pandas"]
 data = ["pandas", "pyarrow"]
 classifier = ["numpy", "scikit-learn", "matplotlib", "pillow", "rdkit", "torch", "transformers"]
+rollout = ["litellm", "pandas", "pyarrow"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
