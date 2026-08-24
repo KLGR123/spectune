@@ -8,14 +8,10 @@ from pathlib import Path
 
 
 def _default_output_dir() -> str:
-    configured = os.getenv("SPECTUNE_OUTPUT_DIR") or os.getenv("OUTPUT_PATH")
-    return configured or str(Path(__file__).resolve().parents[2] / "outputs")
+    return str(Path(__file__).resolve().parents[2] / "outputs")
 
 
 def _default_nmr_num_workers() -> int:
-    configured = os.getenv("SPECTUNE_NMR_WORKERS")
-    if configured:
-        return int(configured)
     return min(16, os.cpu_count() or 1)
 
 

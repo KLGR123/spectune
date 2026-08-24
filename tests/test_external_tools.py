@@ -42,6 +42,8 @@ from spectune import (
     NmrForwardPredictTool,
     NmrGenerateConfig,
     NmrGenerateTool,
+    NmrRerankConfig,
+    NmrRerankTool,
     NmrRepairConfig,
     NmrRepairTool,
     ReactionLocalIndexSearchConfig,
@@ -116,16 +118,16 @@ def test_external_nmr_repair_returns_candidate():
     assert result.status in {"ok", "no_candidates"}
 
 
-# @pytest.mark.skipif(not _HAS_EXTERNAL_NMR_RERANK, reason="NMR_RANK_API_URL is not set")
-# def test_external_nmr_rerank_returns_ranking():
-#     # NmrRerankConfig() reads NMR_RANK_API_URL from the environment.
-#     tool = NmrRerankTool(NmrRerankConfig())
+@pytest.mark.skipif(not _HAS_EXTERNAL_NMR_RERANK, reason="NMR_RANK_API_URL is not set")
+def test_external_nmr_rerank_returns_ranking():
+    # NmrRerankConfig() reads NMR_RANK_API_URL from the environment.
+    tool = NmrRerankTool(NmrRerankConfig())
 
-#     result = asyncio.run(tool.execute({"smiles_list": ["CCO", "COC"]}))
-#     print(result)
-#     assert result.completion == "success", result.warnings
-#     assert result.status in {"ok", "no_candidates"}
-#     assert isinstance(result.data.get("candidates"), list)
+    result = asyncio.run(tool.execute({"smiles_list": ["CCO", "COC"]}))
+    print(result)
+    assert result.completion == "success", result.warnings
+    assert result.status in {"ok", "no_candidates"}
+    assert isinstance(result.data.get("candidates"), list)
 
 
 @pytest.mark.skipif(
@@ -155,15 +157,15 @@ def test_external_nmr_forward_predict_returns_shifts():
 #     assert isinstance(result.data.get("candidates"), list)
 
 
-# @pytest.mark.skipif(not _HAS_LOCAL_REACTION_INDEX, reason="no RXN_LOCAL_INDEX_* path is configured")
-# def test_external_reaction_local_index_search_returns_candidates():
-#     # ReactionLocalIndexSearchConfig() reads the RXN_LOCAL_INDEX_* paths from the environment.
-#     tool = ReactionLocalIndexSearchTool(ReactionLocalIndexSearchConfig())
+@pytest.mark.skipif(not _HAS_LOCAL_REACTION_INDEX, reason="no RXN_LOCAL_INDEX_* path is configured")
+def test_external_reaction_local_index_search_returns_candidates():
+    # ReactionLocalIndexSearchConfig() reads the RXN_LOCAL_INDEX_* paths from the environment.
+    tool = ReactionLocalIndexSearchTool(ReactionLocalIndexSearchConfig())
 
-#     result = asyncio.run(tool.execute({"reactants": ["CCO", "CC(=O)Cl"], "topk": 1}))
-#     print(result)
-#     assert result.completion in {"success", "partial"}, result.warnings
-#     assert result.status in {"ok", "no_candidates"}
+    result = asyncio.run(tool.execute({"reactants": ["CCO", "CC(=O)Cl"], "topk": 1}))
+    print(result)
+    assert result.completion in {"success", "partial"}, result.warnings
+    assert result.status in {"ok", "no_candidates"}
 
 
 # @pytest.mark.skipif(not _NETWORK_TESTS_ENABLED, reason="SPECTUNE_ENABLE_NETWORK_TESTS is not set")

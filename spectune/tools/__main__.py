@@ -6,16 +6,16 @@ exposed during rollout.
 Usage::
 
     python -m spectune.tools write-config \
-        --output examples/grpo/tools_config.yaml
+        --output outputs/datasets/verl/tools_config.yaml
 
     # restrict to a specific subset of tools
     python -m spectune.tools write-config \
-        --output examples/grpo/tools_config.yaml \
+        --output outputs/datasets/verl/tools_config.yaml \
         --tools nmr_generate nmr_repair nmr_forward_predict
 
     # raise the nmr_generate candidate budget
     python -m spectune.tools write-config \
-        --output examples/grpo/tools_config.yaml \
+        --output outputs/datasets/verl/tools_config.yaml \
         --nmr-gen-topk 30
 """
 

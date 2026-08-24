@@ -6,25 +6,38 @@ from pathlib import Path
 from flask import Flask, abort, jsonify, render_template_string, request
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_TRAJ_DIR = ROOT / "outputs" / "trajectories"
+DEFAULT_TRAJ_DIR = ROOT / "outputs" / "trajectories" / "spectune"
 
 app = Flask(__name__)
 TRAJ_DIR: Path = DEFAULT_TRAJ_DIR
 
 
-def extract_user_input(raw: str) -> str:
-    """Return the content after the first 'user' role marker."""
+def _extract_role_content(raw: str, role: str) -> str:
+    """Return content following the first standalone ``role`` marker."""
     lines = raw.split("\n")
     for i, line in enumerate(lines):
-        if line.strip() == "user":
-            # collect until next role marker or end
+        if line.strip() == role:
             parts = []
             for j in range(i + 1, len(lines)):
                 if lines[j].strip() in ("assistant", "system", "user"):
                     break
                 parts.append(lines[j])
             return "\n".join(parts).strip()
-    return raw.strip()
+    return ""
+
+
+def extract_input_sections(raw: str) -> tuple[str, str]:
+    """Return the system prefix and first user turn from a serialized prompt."""
+    system_prompt = _extract_role_content(raw, "system")
+    user_input = _extract_role_content(raw, "user")
+    if not system_prompt and not user_input:
+        user_input = raw.strip()
+    return system_prompt, user_input
+
+
+def extract_user_input(raw: str) -> str:
+    """Return the first user turn, preserving the historical helper API."""
+    return extract_input_sections(raw)[1]
 
 
 def parse_output_segments(raw: str) -> list[dict]:
@@ -103,7 +116,7 @@ HTML = r"""<!doctype html>
 <html lang="zh">
 <head>
 <meta charset="utf-8"/>
-<title>Trajectory Viewer</title>
+<title>RL Rollouts Viewer</title>
 <style>
   :root {
     --bg: #f6f8fa; --panel: #fff; --border: #d0d7de;
@@ -122,10 +135,16 @@ HTML = r"""<!doctype html>
   /* sidebar */
   #sidebar { width: 260px; min-width: 200px; border-right: 1px solid var(--border);
              overflow-y: auto; background: var(--panel); padding: 8px 0; flex-shrink: 0; }
-  .group-label { padding: 6px 12px; font-size: 11px; font-weight: 600;
-                 color: var(--gray); text-transform: uppercase; letter-spacing: .05em;
-                 border-bottom: 1px solid var(--border); margin-bottom: 4px; }
-  .file-link { display: block; padding: 5px 16px; cursor: pointer;
+  .group-toggle { padding: 7px 12px; font-size: 12px; font-weight: 600;
+                  color: #24292f; cursor: pointer; display: flex; align-items: center;
+                  gap: 6px; user-select: none; border-bottom: 1px solid var(--border); }
+  .group-toggle:hover { background: #f0f6ff; }
+  .group-toggle .arrow { font-size: 10px; color: var(--gray); display: inline-block;
+                         transition: transform .15s; }
+  .group-toggle.open .arrow { transform: rotate(90deg); }
+  .group-children { display: none; background: #fafbfc; }
+  .group-children.open { display: block; }
+  .file-link { display: block; padding: 5px 12px 5px 26px; cursor: pointer;
                color: var(--blue); font-size: 13px; }
   .file-link:hover { background: #f0f6ff; }
   .file-link.active { background: #dbeafe; font-weight: 600; }
@@ -169,6 +188,7 @@ HTML = r"""<!doctype html>
   .section-content.hidden { display: none; }
 
   /* input */
+  .system-section .section-title { background: #f0f0f0; color: var(--gray); }
   .input-section .section-title { background: #f0fff4; color: var(--green); }
   .input-text { white-space: pre-wrap; line-height: 1.6; }
 
@@ -192,16 +212,22 @@ HTML = r"""<!doctype html>
 </head>
 <body>
 <header>
-  <h1>Trajectory Viewer</h1>
+  <h1>RL Rollouts Viewer</h1>
   <span style="font-size:12px;color:#aaa;">{{ traj_dir }}</span>
 </header>
 <div class="layout">
   <div id="sidebar">
     {% for group, files in tree.items() %}
-      <div class="group-label">{{ group }}</div>
-      {% for f in files %}
+    <div>
+      <div class="group-toggle" onclick="toggleGroup(this)">
+        <span class="arrow">▶</span>{{ group }}
+      </div>
+      <div class="group-children">
+        {% for f in files %}
         <a class="file-link" onclick="loadFile('{{ f.rel }}', this)">{{ f.name }}</a>
-      {% endfor %}
+        {% endfor %}
+      </div>
+    </div>
     {% endfor %}
   </div>
   <div id="main">
@@ -258,6 +284,13 @@ function scoreBadgeClass(s) {
 }
 
 function renderTraj(t) {
+  const systemHtml = t.system_prompt ? `
+    <div class="section system-section">
+      <div class="section-title collapsed" onclick="toggleSection(this)">System</div>
+      <div class="section-content hidden">
+        <div class="input-text">${escHtml(t.system_prompt)}</div>
+      </div>
+    </div>` : '';
   const segsHtml = t.segments.map(seg => {
     if (seg.type === 'text') {
       return `<div class="seg seg-text">
@@ -299,6 +332,7 @@ function renderTraj(t) {
       <span>tool_calls: ${t.tool_call_count ?? '?'}</span>
       <span>validity: ${t.smiles_validity ?? '?'}</span>
     </div>
+    ${systemHtml}
     <div class="section input-section">
       <div class="section-title" onclick="toggleSection(this)">Input</div>
       <div class="section-content">
@@ -312,10 +346,20 @@ function renderTraj(t) {
   </div>`;
 }
 
+function toggleGroup(el) {
+  el.classList.toggle('open');
+  el.nextElementSibling.classList.toggle('open');
+}
+
 function toggleSection(titleEl) {
   titleEl.classList.toggle('collapsed');
   titleEl.nextElementSibling.classList.toggle('hidden');
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  const first = document.querySelector('.group-toggle');
+  if (first) toggleGroup(first);
+});
 </script>
 </body>
 </html>
@@ -353,7 +397,7 @@ def api_file():
             except json.JSONDecodeError:
                 continue
 
-            user_input = extract_user_input(d.get("input", ""))
+            system_prompt, user_input = extract_input_sections(d.get("input", ""))
             segments = parse_output_segments(d.get("output", ""))
 
             results.append(
@@ -364,6 +408,7 @@ def api_file():
                     "gts": d.get("gts", ""),
                     "tool_call_count": d.get("tool_call_count"),
                     "smiles_validity": d.get("smiles_validity"),
+                    "system_prompt": system_prompt,
                     "user_input": user_input,
                     "segments": segments,
                 }

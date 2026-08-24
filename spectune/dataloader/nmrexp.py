@@ -14,10 +14,12 @@ candidate molecular structure. It ships as two schema-compatible shapes:
 Both shapes share the same 15 base columns (enforced by :func:`_validate_schema`
 below), so :class:`NmrExpDataLoader` normalizes every configured source into
 one flat record schema (a resolved ``gt_smiles``, the NMR evidence, and
-provenance/QC metadata). The raw export becomes ``truth_train`` while the
-human-checked exports are merged into ``truth_test``. Downstream,
-:class:`~spectune.augmentor.Augmentor` reads a truth split and shuffles/slices
-it into the final train/test/sft query datasets.
+provenance/QC metadata). The raw export becomes ``truth_bulk`` while the
+human-checked exports are merged into ``truth_verified``. These truth-split
+names describe *provenance* only; they are unrelated to the eventual
+train/test/sft role a sampled row plays. Downstream,
+:class:`~spectune.augmentor.Augmentor` reads one truth split and
+shuffles/slices it into the final train/test/sft query datasets.
 """
 
 from __future__ import annotations
@@ -74,7 +76,7 @@ _CHECKED_COLUMNS = (
 
 
 class NmrExpDataLoader:
-    """Loads NMRexp exports into separate ``truth_train``/``truth_test`` pools.
+    """Loads NMRexp exports into separate ``truth_bulk``/``truth_verified`` pools.
 
     1. :meth:`preprocess` reads the raw parquet/CSV file(s) named in
        ``config.sources``, resolves one ground-truth SMILES per row,
@@ -116,8 +118,8 @@ class NmrExpDataLoader:
         """Build (or reuse) cached JSON-Lines files for requested truth splits.
 
         Returns a mapping from split name to its cache/build summary. With the
-        default config this writes ``nmrexp_truth_train.jsonl`` from the raw
-        parquet and ``nmrexp_truth_test.jsonl`` from all checked CSV sources.
+        default config this writes ``nmrexp_truth_bulk.jsonl`` from the raw
+        parquet and ``nmrexp_truth_verified.jsonl`` from all checked CSV sources.
         """
         if not has_pandas():
             raise RuntimeError("pandas is required for NmrExpDataLoader; install spectune[data]")
@@ -166,7 +168,7 @@ class NmrExpDataLoader:
                 if not source_path.exists():
                     raise FileNotFoundError(
                         f"NMRexp raw source {source_key!r} for truth split {split!r} not found: {source_path} "
-                        "(set NMREXP_RAW_DIR or pass a NmrExpDataLoaderConfig(raw_dir=...))"
+                        "(pass NmrExpDataLoaderConfig(raw_dir=...) or --raw-dir)"
                     )
                 frame = _read_raw_table(source_path)
                 is_checked = _validate_schema(frame, source_path)
@@ -201,7 +203,7 @@ class NmrExpDataLoader:
             }
         return summaries
 
-    def load(self, split: str = "train", *, force_reprocess: bool = False) -> JsonlDataset:
+    def load(self, split: str = "bulk", *, force_reprocess: bool = False) -> JsonlDataset:
         """Return one processed truth split, building its cache if needed."""
         if split not in self.config.truth_splits:
             raise KeyError(
@@ -212,7 +214,7 @@ class NmrExpDataLoader:
             self.preprocess([split], overwrite=force_reprocess)
         return JsonlDataset(out_path)
 
-    def load_truth(self, split: str = "train", **kwargs: Any) -> JsonlDataset:
+    def load_truth(self, split: str = "bulk", **kwargs: Any) -> JsonlDataset:
         """Alias for :meth:`load`, explicitly named for truth datasets."""
         return self.load(split, **kwargs)
 

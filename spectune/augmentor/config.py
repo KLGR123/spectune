@@ -15,12 +15,14 @@ Two layers, each independently overridable:
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
+from spectune.dataloader.config import default_datasets_dir as _default_datasets_dir
 from spectune.llm import LlmConfig
 from spectune.tools.config import (
     AskcosReactionForwardPredictConfig,
@@ -43,10 +45,6 @@ _DEFAULT_INFORMATION_MIX: Mapping[str, float] = MappingProxyType(
         "fragment": 0.15,
     }
 )
-
-
-def _default_datasets_dir() -> str:
-    return os.getenv("SPECTUNE_DATASETS_DIR", "./datasets")
 
 
 def _default_scan_workers() -> int:
@@ -159,7 +157,7 @@ class AugmentorConfig:
     """
 
     dataset_name: str = "nmrexp"
-    split: str = "train"
+    split: str = "bulk"
     sample_size: int = 0
     seed: int = 42
     cluster_key: str = "cluster"
@@ -221,6 +219,19 @@ class AugmentorConfig:
             raise ValueError("nmr_noise_ratio is set but nmr_noise_modes is empty")
         if self.sample_size < 0:
             raise ValueError("sample_size must be non-negative (0 means the whole split)")
+
+        # EnrichmentConfig.cache_path defaults independently (it can be used
+        # standalone), so a caller who only overrides datasets_dir -- e.g. via
+        # `--datasets-dir` -- would otherwise still cache enrichment under the
+        # unrelated default directory. Re-derive it from datasets_dir whenever
+        # the caller left the nested config on its own plain default.
+        default_cache_path = str(Path(_default_datasets_dir()) / "enrichment.jsonl")
+        if self.enrichment.cache_path == default_cache_path and self.datasets_dir != _default_datasets_dir():
+            object.__setattr__(
+                self,
+                "enrichment",
+                dataclasses.replace(self.enrichment, cache_path=str(Path(self.datasets_dir) / "enrichment.jsonl")),
+            )
 
 
 __all__ = [

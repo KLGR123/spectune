@@ -43,12 +43,20 @@ class RewardConfig:
     invalid_tool_call_penalty: float = -1.0
     invalid_smiles_penalty: float = -1.0
     # Align with typical verl multi_turn.max_assistant_turns for tool agents.
-    max_tool_calls: int | None = 8
+    max_tool_calls: int | None = 16
     excess_tool_call_penalty: float = -0.1
     # When True (default), only format-spec v1 answers are scored:
     # ``{"smiles": ["...", ...]}``. Set False only for offline legacy audits.
     strict_answer_format: bool = True
     component_weights: Mapping[str, float] = field(default_factory=_default_component_weights)
+    # Extra, unweighted bonus awarded when the trajectory called ``nmr_generate``,
+    # got full (rank-1) GT credit on the weighted ``gt_smiles`` component --
+    # i.e. ``weighted_components["gt_smiles"] == gt_match_reward *
+    # component_weights["gt_smiles"]`` (0.7 under the defaults above) -- and its
+    # top answer candidate differs from every ``nmr_generate`` call's own top
+    # candidate, so the model isn't just parroting the tool. Added directly to
+    # the final score, outside the ``component_weights`` sum-to-1 system.
+    nmr_diversity_bonus: float = 0.5
 
     def __post_init__(self) -> None:
         if self.gt_match_reward < 0:
@@ -63,6 +71,8 @@ class RewardConfig:
             raise ValueError("max_tool_calls must be non-negative or None")
         if self.excess_tool_call_penalty > 0:
             raise ValueError("excess_tool_call_penalty must be non-positive")
+        if self.nmr_diversity_bonus < 0:
+            raise ValueError("nmr_diversity_bonus must be non-negative")
 
         if not isinstance(self.component_weights, Mapping):
             raise TypeError("component_weights must be a mapping")

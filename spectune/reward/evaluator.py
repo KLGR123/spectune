@@ -9,13 +9,23 @@ from collections.abc import Mapping, Sequence
 from dataclasses import is_dataclass
 from typing import Any
 
+from spectune.format.v1 import TOOL_CALL_END, TOOL_CALL_START, TOOL_RESPONSE_END, TOOL_RESPONSE_START
 from spectune.format.v1 import extract_smiles_candidates as extract_v1_smiles
+from spectune.format.v1 import extract_tool_calls as extract_v1_tool_calls
 from spectune.format.v1 import messages_from_decoded_hermes
 
 from .base import JsonDict, RewardResult
 from .config import COMPONENT_KEYS, RewardConfig
 
-_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL | re.IGNORECASE)
+_TOOL_CALL_RE = re.compile(
+    rf"{re.escape(TOOL_CALL_START)}\s*(.*?)\s*{re.escape(TOOL_CALL_END)}",
+    re.DOTALL | re.IGNORECASE,
+)
+_TOOL_RESPONSE_RE = re.compile(
+    rf"{re.escape(TOOL_RESPONSE_START)}\s*(.*?)\s*{re.escape(TOOL_RESPONSE_END)}",
+    re.DOTALL | re.IGNORECASE,
+)
+_NMR_GENERATE_TOOL_NAME = "nmr_generate"
 _SMILES_TAG_RE = re.compile(r"<smiles>\s*(.*?)\s*</smiles>", re.DOTALL | re.IGNORECASE)
 _ANSWER_KEYS = ("candidates", "smiles_list", "answers", "answer", "smiles", "canonical_smiles")
 _SMILES_TOKEN_RE = re.compile(r"^[A-Za-z0-9@+\-\[\]()=#$\\/%.:*]+$")
@@ -117,6 +127,18 @@ class RewardEvaluator:
         }
         weights = config.component_weights
         weighted_components = {key: float(weights[key] * components[key]) for key in COMPONENT_KEYS}
+
+        called_nmr_generate, nmr_generate_first_results = _nmr_generate_calls_and_first_results(messages)
+        first_answer_candidate = valid_candidates[0] if valid_candidates else None
+        nmr_diversity_bonus_applied = bool(
+            called_nmr_generate
+            and nmr_generate_first_results
+            and first_answer_candidate is not None
+            and gt_rank == 1
+            and first_answer_candidate not in nmr_generate_first_results
+        )
+        nmr_diversity_bonus = config.nmr_diversity_bonus if nmr_diversity_bonus_applied else 0.0
+
         warnings: list[str] = []
         if not rdkit_available:
             warnings.append("rdkit is unavailable; SMILES were compared as opaque strings and validity was not checked")
@@ -131,11 +153,12 @@ class RewardEvaluator:
             print(f"[DEBUG] invalid_tool_calls = {invalid_call_errors}")
             print(f"[DEBUG] components = {components}")
             print(f"[DEBUG] weighted_components = {weighted_components}")
-            print(f"[DEBUG] total_score = {sum(weighted_components.values()):.4f}")
+            print(f"[DEBUG] nmr_diversity_bonus = {nmr_diversity_bonus}")
+            print(f"[DEBUG] total_score = {sum(weighted_components.values()) + nmr_diversity_bonus:.4f}")
             breakpoint()
 
         return RewardResult(
-            score=float(sum(weighted_components.values())),
+            score=float(sum(weighted_components.values()) + nmr_diversity_bonus),
             components=components,
             details={
                 "gt_rank": gt_rank,
@@ -149,6 +172,10 @@ class RewardEvaluator:
                 "invalid_tool_calls": invalid_call_errors,
                 "component_weights": dict(weights),
                 "weighted_components": weighted_components,
+                "called_nmr_generate": called_nmr_generate,
+                "nmr_generate_first_results": nmr_generate_first_results,
+                "nmr_diversity_bonus_applied": nmr_diversity_bonus_applied,
+                "nmr_diversity_bonus": float(nmr_diversity_bonus),
                 "strict_answer_format": config.strict_answer_format,
             },
             warnings=warnings,
@@ -239,6 +266,99 @@ def _collect_tool_calls(messages: Sequence[Mapping[str, Any]]) -> tuple[list[Jso
                 continue
             calls.append(parsed)
     return calls, errors
+
+
+def _assistant_tool_call_names(message: Mapping[str, Any]) -> list[str]:
+    """Names of the tool calls issued by one assistant message, in call order."""
+    structured = message.get("tool_calls")
+    if isinstance(structured, Sequence) and not isinstance(structured, str | bytes):
+        names: list[str] = []
+        for value in structured:
+            mapping = _as_mapping(value)
+            if mapping is None:
+                continue
+            function = mapping.get("function") if isinstance(mapping.get("function"), Mapping) else mapping
+            name = function.get("name") if isinstance(function, Mapping) else None
+            if isinstance(name, str) and name.strip():
+                names.append(name.strip())
+        return names
+    # Hermes-tag content: reuse the shared v1 parser instead of redefining it.
+    return [call["name"] for call in extract_v1_tool_calls(_content_text(message.get("content")))]
+
+
+def _parse_tool_response_payload(content: str) -> JsonDict | None:
+    """Parse a ``ToolResult``-shaped JSON blob out of a tool-response message.
+
+    Tool responses may be wrapped in ``<tool_response>...</tool_response>``
+    (live rollout, see ``rollout.py``) or appear as a bare JSON object (verl
+    hermes decoding, ``role=tool``). Plain user turns never match this shape.
+    """
+    text = (content or "").strip()
+    match = _TOOL_RESPONSE_RE.search(text)
+    if match:
+        text = match.group(1).strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(value, dict) or "completion" not in value or "status" not in value:
+        return None
+    return value
+
+
+def _nmr_generate_calls_and_first_results(messages: Sequence[Mapping[str, Any]]) -> tuple[bool, list[str]]:
+    """Return ``(called, first_results)`` for every ``nmr_generate`` call in the rollout.
+
+    ``first_results`` holds the canonical top-candidate SMILES from each
+    ``nmr_generate`` call whose response carried candidates (deduplicated,
+    call order), matched to its response by call order (each tool-response
+    message pairs with the earliest still-unmatched pending call name). When
+    the trajectory issues multiple ``nmr_generate`` calls, the diversity bonus
+    should only apply if the final answer diverges from *every one* of them,
+    not just the most recent -- otherwise the model could echo an earlier
+    call's top hit and still collect the bonus.
+    """
+    called = False
+    first_results: list[str] = []
+    seen: set[str] = set()
+    pending_names: list[str] = []
+    for message in messages:
+        role = message.get("role")
+        if role == "assistant":
+            names = _assistant_tool_call_names(message)
+            if _NMR_GENERATE_TOOL_NAME in names:
+                called = True
+            pending_names.extend(names)
+            continue
+        if role in ("tool", "user") and pending_names:
+            payload = _parse_tool_response_payload(_content_text(message.get("content")))
+            if payload is None:
+                continue
+            name = pending_names.pop(0)
+            if name != _NMR_GENERATE_TOOL_NAME:
+                continue
+            result = _nmr_generate_first_candidate(payload)
+            if result is not None and result not in seen:
+                seen.add(result)
+                first_results.append(result)
+    return called, first_results
+
+
+def _nmr_generate_first_candidate(payload: Mapping[str, Any]) -> str | None:
+    data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
+    candidates = data.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return None
+    first = candidates[0]
+    if not isinstance(first, Mapping):
+        return None
+    value = first.get("canonical_smiles") or first.get("smiles")
+    if isinstance(value, str) and value.strip():
+        canonical, _ = _canonicalize_smiles(value.strip())
+        return canonical or value.strip()
+    return None
 
 
 def _schema_map(schemas: Sequence[Mapping[str, Any]]) -> dict[str, JsonDict]:

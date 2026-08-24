@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Sequence
-from typing import Any
-
-import litellm
+from typing import TYPE_CHECKING, Any
 
 from .config import LitellmConfig
 
-litellm.drop_params = True
+if TYPE_CHECKING:
+    import litellm
 
 JsonDict = dict[str, Any]
+
+
+def _litellm() -> "litellm":
+    """Import litellm lazily so modules that never call the LLM avoid its startup cost."""
+    import litellm
+
+    litellm.drop_params = True
+    return litellm
 
 
 class LitellmClient:
@@ -71,7 +78,7 @@ class LitellmClient:
         return self._semaphore
 
     def _call(self, messages: list[JsonDict]) -> Any:
-        return litellm.completion(
+        return _litellm().completion(
             model=self.config.model,
             api_key=self.config.api_key,
             api_base=self.config.api_base.rstrip("/"),

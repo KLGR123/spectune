@@ -33,8 +33,10 @@ Four named raw components are computed first:
    `invalid_tool_call_penalty`.
 3. `smiles_validity`: the rollout receives `invalid_smiles_penalty` once if
    any explicitly returned candidate cannot be parsed by RDKit.
-4. `tool_call_count`: calls beyond `max_tool_calls` (default `8`) receive
-   `excess_tool_call_penalty * excess_count`. `None` disables this component.
+4. `tool_call_count`: calls beyond `max_tool_calls` (default `16`, aligned
+   with verl's typical `multi_turn.max_assistant_turns` for tool agents)
+   receive `excess_tool_call_penalty * excess_count`. `None` disables this
+   component.
 
 The final score is the weighted sum
 `sum(component_weights[k] * components[k])`. Weights must be non-negative and
@@ -47,8 +49,26 @@ sum to `1`. Defaults favour GT learning:
 | `smiles_validity` | `0.1` |
 | `tool_call_count` | `0.1` |
 
-Raw term defaults are `1.0`, `0.8`, `-1.0`, `-1.0`, `max_tool_calls=8`, and
+Raw term defaults are `1.0`, `0.8`, `-1.0`, `-1.0`, `max_tool_calls=16`, and
 `-0.1` respectively.
+
+## `nmr_generate` diversity bonus
+
+An additional, unweighted `nmr_diversity_bonus` (default `0.5`) is added
+directly to `score` (outside the `component_weights` sum-to-1 system) when
+all of the following hold:
+
+- the trajectory called the `nmr_generate` tool at least once;
+- the rollout's top answer candidate is a rank-1 GT hit (`gt_rank == 1`,
+  i.e. the weighted `gt_smiles` component is already at its maximum,
+  `gt_match_reward * component_weights["gt_smiles"]`);
+- that top answer candidate differs from the top candidate of **every**
+  `nmr_generate` call in the trajectory (if `nmr_generate` was called more
+  than once, the model must diverge from all of them, not just the most
+  recent) -- i.e. the model didn't just copy a tool suggestion verbatim.
+
+This rewards trajectories where the model uses `nmr_generate` as one input
+among several rather than a shortcut to the final answer.
 
 ## Python API
 
@@ -120,4 +140,5 @@ the exact rollout schemas in `extra_info["tool_schemas"]`. Otherwise the adapter
 
 Batch reward managers can import `spectune.reward.verl.compute_score_batched`.
 
-See `examples/verl/README.md` for dataset compilation and tool YAML wiring.
+See [`examples/README.md`](../../examples/README.md) for dataset compilation
+and tool YAML wiring.

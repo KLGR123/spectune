@@ -18,6 +18,9 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any, TypeVar
 
+from spectune.jsonl import read_jsonl as _read_jsonl
+from spectune.jsonl import write_jsonl as _write_jsonl
+
 JsonDict = dict[str, Any]
 _T = TypeVar("_T")
 
@@ -254,26 +257,12 @@ def _index_jsonl_offsets(path: Path) -> list[int]:
 
 def write_jsonl(path: str | Path, records: Iterable[JsonDict]) -> int:
     """Write ``records`` to ``path`` as JSON-Lines, returning the row count written."""
-    out_path = Path(path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    count = 0
-    with out_path.open("w", encoding="utf-8") as handle:
-        for record in records:
-            handle.write(json.dumps(record, ensure_ascii=False))
-            handle.write("\n")
-            count += 1
-    return count
+    return _write_jsonl(path, records)
 
 
 def read_jsonl(path: str | Path) -> list[JsonDict]:
     """Fully materialize a JSON-Lines file into a list; convenience for small files/tests."""
-    records: list[JsonDict] = []
-    with Path(path).open("r", encoding="utf-8") as handle:
-        for line in handle:
-            stripped = line.strip()
-            if stripped:
-                records.append(json.loads(stripped))
-    return records
+    return _read_jsonl(path)
 
 
 def has_pandas() -> bool:

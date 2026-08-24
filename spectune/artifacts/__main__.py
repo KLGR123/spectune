@@ -18,19 +18,47 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     compile_parser = subparsers.add_parser("compile", help="JSONL to parquet/jsonl RLHF rows")
-    compile_parser.add_argument("--input", "-i", required=True, help="Spectune JSONL path")
+    compile_parser.add_argument(
+        "--input",
+        "-i",
+        required=True,
+        nargs="+",
+        help=(
+            "One or more Spectune JSONL paths. When multiple paths are given, "
+            "their samples are merged and shuffled together before compiling."
+        ),
+    )
     compile_parser.add_argument("--output", "-o", required=True, help="Output .parquet or .jsonl")
     compile_parser.add_argument("--split", default="train", help="Split label stored in extra_info")
     compile_parser.add_argument(
+        "--no-shuffle",
+        action="store_true",
+        help="Preserve input order instead of shuffling merged samples (default: shuffle)",
+    )
+    compile_parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Seed for the merge shuffle, for reproducible ordering",
+    )
+    compile_parser.add_argument(
         "--data-source",
-        default="spectune/nmrexp",
-        help="data_source field written into each row",
+        nargs="+",
+        default=["spectune/nmrexp"],
+        metavar="SOURCE",
+        help=(
+            "data_source field written into each row. Pass one value to apply it to every "
+            "--input path, or exactly one value per --input path to tag each source "
+            "differently (e.g. --data-source spectune/nmrexp spectune/others)."
+        ),
     )
     compile_parser.add_argument(
         "--tools",
+        nargs="+",
         default=None,
+        metavar="TOOL",
         help=(
-            "Comma-separated tool names to expose via extra_info.tools_kwargs. "
+            "Tool names to expose via extra_info.tools_kwargs. "
             f"Defaults to the standard RL set: {', '.join(DEFAULT_RL_TOOL_NAMES)}"
         ),
     )
@@ -70,13 +98,16 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--reward-config-json must decode to an object")
         reward_config = loaded
 
-    if args.tools is not None:
-        tool_names = tuple(name.strip() for name in args.tools.split(",") if name.strip())
-    else:
-        tool_names = tuple(DEFAULT_RL_TOOL_NAMES)
+    tool_names = tuple(args.tools) if args.tools else tuple(DEFAULT_RL_TOOL_NAMES)
+
+    if len(args.data_source) not in (1, len(args.input)):
+        raise SystemExit(
+            f"--data-source got {len(args.data_source)} values for {len(args.input)} --input paths; "
+            "pass exactly one (broadcast to all) or one per --input path"
+        )
 
     config = ArtifactCompileConfig(
-        data_source=args.data_source,
+        data_source=args.data_source[0],
         tool_names=tool_names,
         reward_config=reward_config,
         include_tool_schemas=bool(args.include_tool_schemas),
@@ -86,17 +117,20 @@ def main(argv: list[str] | None = None) -> int:
         args.output,
         split=args.split,
         config=config,
+        shuffle=not args.no_shuffle,
+        seed=args.seed,
+        data_sources=args.data_source,
     )
     print(f"wrote {count} rows to {args.output} (format_spec={FORMAT_SPEC_VERSION})")
 
     if args.manifest:
         manifest = {
-            "input": str(Path(args.input)),
+            "input": [str(Path(p)) for p in args.input],
             "output": str(Path(args.output)),
             "rows": count,
             "split": args.split,
             "format_spec": FORMAT_SPEC_VERSION,
-            "data_source": config.data_source,
+            "data_source": list(args.data_source) if len(args.data_source) > 1 else config.data_source,
             "tool_names": list(config.tool_names),
         }
         manifest_path = Path(args.manifest)

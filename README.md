@@ -2,7 +2,7 @@
 
 Train your own spectrum-interpretation agent for NMR and EI-MS through a full pipeline: dataset construction and augmentation, rollout, post-training (SFT and RL), and end-to-end evaluation.
 
-Spectune owns data norms, sample construction, tools, and rewards; external trainers such as [verl](https://github.com/volcengine/verl) are optional adapters (Parquet mapping, rollout, distributed SFT/RL). The core package does not depend on torch, ray, or verl. See [`examples/verl/README.md`](examples/verl/README.md) for agentic tool RL.
+Spectune owns data norms, sample construction, tools, and rewards; external trainers such as [verl](https://github.com/volcengine/verl) are optional adapters (Parquet mapping, rollout, distributed SFT/RL). The core package does not depend on torch, ray, or verl. See [`examples/README.md`](examples/README.md) for agentic tool RL.
 
 ## Install
 
@@ -26,7 +26,7 @@ export SANDBOX_FUSION_URL=<url>             # code_interpreter (sandbox backend)
 export NMR_GENERATE_API_URL=<url>           # nmr_generate
 export NMR_REPAIR_API_URL=<url>             # nmr_repair
 export NMR_RANK_API_URL=<url>               # nmr_rerank
-export NMR_PREDICT_MCP_URL=<url>            # nmr_forward_predict (needs `pip install spectune[mcp]`)
+export NMR_PREDICT_API_URL=<url>            # nmr_forward_predict (needs `pip install spectune[mcp]`)
 export NMREXP_SEARCH_MCP_BASE_URL=<url>     # nmrexp_search
 
 source secrets.env

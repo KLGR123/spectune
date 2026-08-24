@@ -28,19 +28,19 @@ def _build_preprocess_parser(sub: argparse._SubParsersAction) -> None:  # type: 
         nargs="+",
         metavar="SPLIT",
         default=None,
-        help="Which splits to build (default: all configured splits, usually train and test).",
+        help="Which splits to build (default: all configured splits, usually bulk and verified).",
     )
     p.add_argument(
         "--raw-dir",
         metavar="DIR",
         default=None,
-        help="Directory containing raw NMRexp exports (overrides NMREXP_RAW_DIR env var).",
+        help="Directory containing raw NMRexp exports (default: NmrExpDataLoaderConfig.raw_dir).",
     )
     p.add_argument(
         "--datasets-dir",
         metavar="DIR",
         default=None,
-        help="Output directory for processed JSONL files (overrides SPECTUNE_DATASETS_DIR env var).",
+        help="Output directory for processed JSONL files (default: outputs/datasets).",
     )
     p.add_argument(
         "--max-records",

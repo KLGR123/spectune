@@ -11,12 +11,17 @@ rows as plain template text instead of LLM-rewritten prose, and
 ``formula_noise_ratio`` similarly replaces a share of formula conditions with
 a nearby composition.
 
-Every draw, fallback, and rejection is written back onto the output record, so
-downstream analysis can slice the dataset by scenario without re-deriving
-anything. In particular, when a molecule turns out not to *have* the drawn
-information (no published name, no reaction precedent), the row degrades to a
-spectrum-only query and says so via ``information_available: false`` rather
-than inventing the fact.
+Every draw, fallback, and rejection is tracked while a batch is built, and
+aggregated into ``Augmentor.last_summary`` -- but only ``information_type``
+(the effective, post-degradation scenario label consumed by
+``spectune.artifacts.compile``) is written back onto the output record
+itself. The rest of the scenario metadata (requested type, placement, noise
+details, enrichment lookups, ...) has no downstream reader once the record
+is a training sample, so it is discarded rather than shipped in every row.
+In particular, when a molecule turns out not to *have* the drawn information
+(no published name, no reaction precedent), the row degrades to a
+spectrum-only query, tallied in ``last_summary["information_degraded"]``
+rather than inventing the fact.
 """
 
 from __future__ import annotations
@@ -75,7 +80,7 @@ class Augmentor:
         self.last_summary: JsonDict | None = None
 
     def load_truth(self, split: str | None = None) -> Dataset:
-        """Load one clustered truth split (``train`` or ``test``)."""
+        """Load one clustered truth split (``bulk`` or ``verified``)."""
         if self.config.dataset_name.lower() != "nmrexp":
             raise ValueError(f"unsupported dataset {self.config.dataset_name!r}; only NMRexp truth is wired up so far")
         return self.loader.load_truth(split or self.config.split)
@@ -110,7 +115,9 @@ class Augmentor:
 
         plans = [self._plan(record, index) for index, record in enumerate(enriched)]
         rewrites = await self._rewrite(plans)
-        records = [self._assemble(plan, rewrite) for plan, rewrite in zip(plans, rewrites, strict=True)]
+        assembled = [self._assemble(plan, rewrite) for plan, rewrite in zip(plans, rewrites, strict=True)]
+        records = [record for record, _ in assembled]
+        stats = [s for _, s in assembled]
 
         path = Path(output_path) if output_path else self._default_output_path()
         written = write_jsonl(path, records) if path else 0
@@ -119,27 +126,7 @@ class Augmentor:
             "output_path": str(path) if path else None,
             "written": written,
             "split": self.config.split,
-            "information_types": _counter(record["augmentation"]["information_type"] for record in records),
-            "requested_information_types": _counter(
-                record["augmentation"]["requested_information_type"] for record in records
-            ),
-            "placements": _counter(record["augmentation"]["information_placement"] for record in records),
-            "information_degraded": sum(1 for record in records if record["augmentation"]["information_degraded"]),
-            "llm_rewritten": sum(1 for record in records if record["augmentation"]["llm_rewritten"]),
-            "llm_rejected": sum(
-                1 for record in records if record["augmentation"]["llm_status"] == "rejected_information_loss"
-            ),
-            "noised": _counter(
-                record["augmentation"]["nmr_noise_mode"]
-                for record in records
-                if record["augmentation"]["nmr_noise_applied"]
-            ),
-            "formula_noise_eligible": sum(
-                1 for record in records if record["augmentation"]["information_type"] == "formula"
-            ),
-            "formula_noised": sum(1 for record in records if record["augmentation"]["formula_noise_applied"]),
-            "multi_turn": sum(1 for record in records if record["num_of_queries"] > 1),
-            "modal_dropped": sum(1 for record in records if record["augmentation"]["modal_drop_applied"]),
+            **_build_scenario_summary(stats),
             "enrichment": self.enricher.last_summary,
             "llm": dict(self.llm.stats),
             "elapsed_s": round(time.monotonic() - started, 2),
@@ -194,7 +181,7 @@ class Augmentor:
         for name, raw in split_defs:
             plans = [self._plan(r, i) for i, r in enumerate(raw)]
             rewrites = await self._rewrite(plans)
-            records = [self._assemble(p, rw) for p, rw in zip(plans, rewrites, strict=True)]
+            records = [self._assemble(p, rw)[0] for p, rw in zip(plans, rewrites, strict=True)]
             write_jsonl(output_paths[name], records)
             results[name] = InMemoryDataset(records)
 
@@ -437,7 +424,16 @@ class Augmentor:
             rewrites[index][slot] = completion.strip() if completion else None
         return rewrites
 
-    def _assemble(self, plan: JsonDict, rewrite: JsonDict) -> JsonDict:
+    def _assemble(self, plan: JsonDict, rewrite: JsonDict) -> tuple[JsonDict, JsonDict]:
+        """Render one training sample plus its scenario stats.
+
+        The record is the slim ``{sample_id, gt_smiles, turns, augmentation}``
+        shape ``spectune.artifacts.compile`` and ``spectune.rollout`` expect;
+        every other draw made while planning the row (requested vs. effective
+        information type, noise details, enrichment lookups, ...) is returned
+        separately as ``stats`` for ``last_summary`` aggregation only -- it is
+        never written to disk.
+        """
         record = plan["record"]
         rng: random.Random = plan["rng"]
         first_block, followup_block = _information_blocks(plan)
@@ -463,63 +459,31 @@ class Augmentor:
             turns.append({"turn_index": 1, "role": "user", "content": followup})
 
         llm_status = first_status if followup_status in ("not_applicable", first_status) else "mixed"
-        record_nmr_list = record.get("nmr_list") or ([record.get("nmr")] if record.get("nmr") else None)
-        augmentation = {
-            "requested_information_type": plan["requested_information_type"],
+
+        record_out = {
+            "sample_id": f"{record.get('sample_id')}:aug",
+            "gt_smiles": record.get("gt_smiles"),
+            "turns": turns,
+            # Only the effective, post-degradation scenario label survives
+            # into the record -- it is the one field compile.infer_data_type
+            # actually reads (as extra_info.data_type). Everything else
+            # planned for this row lives in the `stats` dict below instead.
+            "augmentation": {"information_type": plan["information_type"]},
+        }
+        stats = {
             "information_type": plan["information_type"],
+            "requested_information_type": plan["requested_information_type"],
             "information_placement": plan["information_placement"],
-            "information_available": plan["information_available"],
             "information_degraded": plan["information_degraded"],
-            "information_text": plan["information_text"],
-            "information_detail": plan["information_detail"],
-            "uncertain_tone": plan["uncertain"],
-            "llm_requested": plan["llm_rewrite"],
-            "llm_rewritten": llm_status == "llm",
             "llm_status": llm_status,
+            "llm_rewritten": llm_status == "llm",
             "nmr_noise_applied": bool(plan["noise"].get("applied")),
             "nmr_noise_mode": plan["noise"].get("mode"),
-            "nmr_noise_detail": plan["noise"],
             "formula_noise_applied": bool(plan["formula_noise"].get("applied")),
-            "formula_noise_detail": plan["formula_noise"],
-            "reaction_noise_applied": False,
-            "num_active_modalities": len(plan["nmr_list"]),
-            "dropped_modalities": plan["dropped_modalities"],
             "modal_drop_applied": bool(plan["dropped_modalities"]),
-            "has_name_zh": bool(((record.get("enrichment") or {}).get("names") or {}).get("name_zh")),
-            "has_name_en": bool(((record.get("enrichment") or {}).get("names") or {}).get("name_en")),
-            "has_reaction_precedent": bool(((record.get("enrichment") or {}).get("reaction") or {}).get("precedents")),
-            "num_retro_routes": len(((record.get("enrichment") or {}).get("reaction") or {}).get("routes") or []),
-            "askcos_verified": any(
-                (route.get("askcos") or {}).get("verified")
-                for route in ((record.get("enrichment") or {}).get("reaction") or {}).get("routes") or []
-            ),
-            "has_polymer_context": bool(
-                (((record.get("enrichment") or {}).get("reaction") or {}).get("polymer") or {}).get("monomer_classes")
-            ),
-            "num_fragments": len((record.get("enrichment") or {}).get("fragments") or []),
-            "seed": self.config.seed,
-        }
-        return {
-            "sample_id": f"{record.get('sample_id')}:aug",
-            "source_sample_id": record.get("sample_id"),
-            "modality": record.get("modality", "nmr"),
-            "cluster": record.get(self.config.cluster_key),
-            "turns": turns,
             "num_of_queries": len(turns),
-            "gt_smiles": record.get("gt_smiles"),
-            "molecular_formula": record.get("molecular_formula"),
-            "molecular_weight": ((record.get("enrichment") or {}).get("properties") or {}).get("molecular_weight"),
-            "nmr": record.get("nmr"),
-            "nmr_list": record_nmr_list,
-            "active_nmr_list": plan["nmr_list"],
-            "ms": record.get("ms"),
-            "nmr_text": plan["spectrum_text"],
-            "nmr_text_clean": build_multimodal_spectrum_text(plan["nmr_list"]),
-            "augmentation": augmentation,
-            "enrichment": record.get("enrichment"),
-            "provenance": {**(record.get("provenance") or {}), "augmented_from": record.get("sample_id")},
-            "quality": record.get("quality"),
         }
+        return record_out, stats
 
     def _default_output_path(self) -> Path:
         name = f"{self.config.dataset_name.lower()}_augmented_{self.config.split}.jsonl"
@@ -577,6 +541,23 @@ def _weighted_choice(weights: dict[str, float] | Any, rng: random.Random) -> str
         if threshold <= cumulative:
             return name
     return items[-1][0]
+
+
+def _build_scenario_summary(stats: Sequence[JsonDict]) -> JsonDict:
+    """Aggregate per-row scenario stats (see ``Augmentor._assemble``) for ``last_summary``."""
+    return {
+        "information_types": _counter(s["information_type"] for s in stats),
+        "requested_information_types": _counter(s["requested_information_type"] for s in stats),
+        "placements": _counter(s["information_placement"] for s in stats),
+        "information_degraded": sum(1 for s in stats if s["information_degraded"]),
+        "llm_rewritten": sum(1 for s in stats if s["llm_rewritten"]),
+        "llm_rejected": sum(1 for s in stats if s["llm_status"] == "rejected_information_loss"),
+        "noised": _counter(s["nmr_noise_mode"] for s in stats if s["nmr_noise_applied"]),
+        "formula_noise_eligible": sum(1 for s in stats if s["information_type"] == "formula"),
+        "formula_noised": sum(1 for s in stats if s["formula_noise_applied"]),
+        "multi_turn": sum(1 for s in stats if s["num_of_queries"] > 1),
+        "modal_dropped": sum(1 for s in stats if s["modal_drop_applied"]),
+    }
 
 
 def _counter(values: Any) -> dict[str, int]:

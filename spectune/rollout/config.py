@@ -46,6 +46,9 @@ class RolloutConfig:
     tool_names: tuple[str, ...] = ()
     max_assistant_turns: int = DEFAULT_MAX_ASSISTANT_TURNS
     max_concurrency: int = 8
+    # Optional skill files (default: .md) whose contents are appended to the
+    # end of the system prompt, one per line separator. Empty by default (off).
+    skills: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.max_rounds is not None and self.max_rounds < 1:

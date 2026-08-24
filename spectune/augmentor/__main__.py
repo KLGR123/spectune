@@ -59,11 +59,30 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Sampling
     p.add_argument("--dataset-name", default="nmrexp", metavar="NAME", help="Source dataset name (default: nmrexp).")
-    p.add_argument("--split", default="train", metavar="SPLIT", help="Dataset split to draw from (default: train).")
+    p.add_argument(
+        "--split",
+        default="bulk",
+        metavar="SPLIT",
+        help=(
+            "Truth split to draw from (default: bulk, the large unverified pool; "
+            "'verified' is the small human-checked pool). Unrelated to the "
+            "output train/test/sft split names below."
+        ),
+    )
     p.add_argument(
         "--sample-size", type=int, default=0, metavar="N", help="Number of rows to sample (0 = full split, default: 0)."
     )
     p.add_argument("--seed", type=int, default=42, help="Random seed (default: 42).")
+    p.add_argument(
+        "--datasets-dir",
+        metavar="DIR",
+        default=None,
+        help=(
+            "Directory for the underlying dataloader's truth JSONL cache and the "
+            "enrichment cache (default: outputs/datasets). "
+            "Independent of --output, which sets where this command's own JSONL goes."
+        ),
+    )
     p.add_argument("--no-progress", action="store_true", help="Suppress progress bars.")
 
     # Information mix
@@ -128,7 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="P",
         help=(
             "Probability that a multi-modality row drops some of its spectra before "
-            "query construction; at least one spectrum is always kept (default: 0.0)."
+            "query construction; at least one spectrum is always kept (default: 0.5)."
         ),
     )
 
@@ -159,6 +178,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     if args.information_mix is not None:
         config_kwargs["information_mix"] = args.information_mix
+    if args.datasets_dir:
+        config_kwargs["datasets_dir"] = args.datasets_dir
 
     config = AugmentorConfig(**config_kwargs)
     augmentor = Augmentor(config)

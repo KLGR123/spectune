@@ -75,9 +75,10 @@ def compute_score(
 ) -> dict[str, float]:
     """Compute reward and per-component scores using the signature expected by verl.
 
-    Returns a dict with ``score`` (total weighted reward) plus individual
-    component keys (``gt_smiles``, ``tool_call_format``, ``smiles_validity``,
-    ``tool_call_count``) so verl logs them as separate TensorBoard curves.
+    Returns a dict with ``score`` (total reward, including the unweighted
+    ``nmr_diversity_bonus``) plus individual component keys (``gt_smiles``,
+    ``tool_call_format``, ``smiles_validity``, ``tool_call_count``,
+    ``nmr_diversity_bonus``) so verl logs them as separate TensorBoard curves.
 
     Reward settings can be passed as keyword arguments or under
     ``extra_info["reward_config"]``. If ``extra_info["rollout_messages"]`` is
@@ -110,7 +111,16 @@ def compute_score(
     tool_schemas = _resolve_tool_schemas(extra_info)
     evaluator = RewardEvaluator(RewardConfig(**config_values), tool_schemas=tool_schemas)
     result = evaluator.evaluate(_resolve_rollout(solution_str, extra_info), ground_truth)
-    return {"score": result.score, **result.components}
+    # ``nmr_diversity_bonus`` is added to ``score`` outside the weighted
+    # component sum (see RewardConfig), so it isn't in ``result.components``.
+    # Surface it explicitly so verl's NaiveRewardManager/DAPORewardManager
+    # pick it up into ``reward_extra_info`` and it gets its own
+    # ``reward_components/nmr_diversity_bonus/mean`` TensorBoard curve.
+    return {
+        "score": result.score,
+        **result.components,
+        "nmr_diversity_bonus": result.details["nmr_diversity_bonus"],
+    }
 
 
 def compute_score_batched(

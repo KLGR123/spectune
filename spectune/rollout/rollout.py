@@ -15,6 +15,7 @@ from spectune.format.v1 import (
     extract_tool_calls,
     format_tools_block,
 )
+from spectune.jsonl import write_jsonl as _write_jsonl
 from spectune.llm import LlmClient, LlmClientProtocol, LlmConfig
 from spectune.tools import (
     DEFAULT_RL_TOOL_NAMES,
@@ -29,6 +30,12 @@ from .config import RolloutConfig
 from .sampling.base import BaseSampler
 
 JsonDict = dict[str, Any]
+
+
+def _load_skill_texts(paths: tuple[str, ...]) -> list[str]:
+    """Read skill file contents (default: ``.md``) in order, stripped of
+    surrounding whitespace."""
+    return [Path(p).expanduser().read_text(encoding="utf-8").strip() for p in paths]
 
 
 @dataclass
@@ -52,6 +59,44 @@ class RolloutRecord:
             "reward_details": self.reward_details,
             "n_rounds": self.n_rounds,
         }
+
+
+def compute_hit_at_k_metrics(
+    records: list[RolloutRecord],
+    *,
+    total_samples: int | None = None,
+) -> JsonDict:
+    """Aggregate canonical ground-truth rank into ``hit@1`` through ``hit@all``.
+
+    ``total_samples`` should include failed rollouts so those samples count as
+    misses. When omitted, only completed records form the denominator.
+    """
+    denominator = len(records) if total_samples is None else total_samples
+    if denominator < len(records):
+        raise ValueError("total_samples cannot be smaller than the number of completed records")
+
+    ranks: list[int | None] = []
+    max_candidates = 0
+    for record in records:
+        details = record.reward_details
+        rank = details.get("gt_rank")
+        ranks.append(rank if isinstance(rank, int) and rank > 0 else None)
+        candidates = details.get("canonical_candidates")
+        if isinstance(candidates, list):
+            max_candidates = max(max_candidates, len(candidates))
+
+    max_rank = max((rank for rank in ranks if rank is not None), default=0)
+    max_k = max(1, max_candidates, max_rank)
+    divisor = float(denominator) if denominator else 1.0
+    metrics: JsonDict = {
+        "num_samples": denominator,
+        "num_completed": len(records),
+        "max_k": max_k,
+    }
+    for k in range(1, max_k + 1):
+        metrics[f"hit@{k}"] = sum(rank is not None and rank <= k for rank in ranks) / divisor
+    metrics["hit@all"] = sum(rank is not None for rank in ranks) / divisor
+    return metrics
 
 
 class Rollout:
@@ -112,7 +157,10 @@ class Rollout:
         names = tuple(self.config.tool_names) or DEFAULT_RL_TOOL_NAMES
         self.tool_names = resolve_tool_names(names, manager=self.tool_manager)
         schemas = schemas_for_names(self.tool_names, manager=self.tool_manager)
-        self.system_prompt = self.config.system_prompt + "\n\n" + format_tools_block(schemas)
+        system_prompt = self.config.system_prompt + "\n\n" + format_tools_block(schemas)
+        for skill_text in _load_skill_texts(self.config.skills):
+            system_prompt += "\n" + skill_text
+        self.system_prompt = system_prompt
 
     async def _run_agent_loop(self, messages: list[JsonDict], sample_id: str = "") -> str | None:
         """Generate → execute tool calls → feed results back, until answer or cap.
@@ -275,12 +323,7 @@ class Rollout:
 
 
 def write_jsonl(records: list[RolloutRecord], path: str | Path) -> None:
-    destination = Path(path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("w", encoding="utf-8") as fh:
-        for record in records:
-            fh.write(json.dumps(record.to_dict(), ensure_ascii=False))
-            fh.write("\n")
+    _write_jsonl(path, (record.to_dict() for record in records))
 
 
 def write_parquet(records: list[RolloutRecord], path: str | Path) -> None:
@@ -293,4 +336,4 @@ def write_parquet(records: list[RolloutRecord], path: str | Path) -> None:
     pd.DataFrame([r.to_dict() for r in records]).to_parquet(destination, index=False)
 
 
-__all__ = ["Rollout", "RolloutRecord", "write_jsonl", "write_parquet"]
+__all__ = ["Rollout", "RolloutRecord", "compute_hit_at_k_metrics", "write_jsonl", "write_parquet"]

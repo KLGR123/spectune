@@ -9,19 +9,49 @@ onto ``RLHFDataset`` fields; other backends can do the same.
 
 from __future__ import annotations
 
-import json
+import random
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from spectune.augmentor.config import INFORMATION_TYPES
 from spectune.format.v1 import FORMAT_SPEC_VERSION, SYSTEM_PROMPT
+from spectune.jsonl import read_jsonl as _read_jsonl
+from spectune.jsonl import write_jsonl as _write_jsonl
 
 JsonDict = dict[str, Any]
 
 DEFAULT_DATA_SOURCE = "spectune/nmrexp"
 DEFAULT_ABILITY = "structure_elucidation"
 DEFAULT_AGENT_NAME = "tool_agent"
+
+_CANONICAL_INFORMATION_TYPES = frozenset(INFORMATION_TYPES)
+
+
+def infer_data_type(sample_id: str, augmentation: Any) -> str:
+    """Resolve a canonical information-type label (one of ``INFORMATION_TYPES``).
+
+    Written once at compile time into ``extra_info.data_type`` so downstream
+    consumers (eval, debug viewers) never need to re-derive it.
+
+    NMRexp samples (from ``spectune.augmentor``) carry the type in
+    ``augmentation["information_type"]``. Samples from other sources (e.g.
+    the "others" SFT pool, which has no ``augmentation`` dict) encode it as
+    the first colon-delimited segment of ``sample_id``, which must be an
+    exact match against ``INFORMATION_TYPES`` -- unresolved compound prefixes
+    (e.g. the former "none_plus_formula", which mixed rows that stated a
+    molecular formula with rows that didn't) should be split and relabeled
+    at the source rather than guessed here.
+    """
+    if isinstance(augmentation, Mapping):
+        candidate = augmentation.get("information_type")
+        if isinstance(candidate, str) and candidate in _CANONICAL_INFORMATION_TYPES:
+            return candidate
+    prefix = str(sample_id).split(":", 1)[0]
+    if prefix in _CANONICAL_INFORMATION_TYPES:
+        return prefix
+    return "none"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,16 +79,7 @@ def compile_sample(
     config: ArtifactCompileConfig | None = None,
     tool_schemas: Sequence[Mapping[str, Any]] | None = None,
 ) -> JsonDict:
-    """Convert one Spectune augmentor sample into a training artifact row.
-
-    Multi-turn samples (two user turns) are split so that only the first user
-    turn appears in ``raw_prompt``.  The second turn is stored in
-    ``extra_info.interaction_kwargs.followup_content`` and is injected by
-    ``ScriptedFollowupInteraction`` after the model's first complete response,
-    producing the intended attention pattern:
-
-        [system, user1] → model rollout → [user2 injected] → model rollout
-    """
+    """Convert one Spectune augmentor sample into a training artifact row."""
     config = config or ArtifactCompileConfig()
     turns = sample.get("turns")
     if not isinstance(turns, Sequence) or isinstance(turns, str | bytes):
@@ -101,11 +122,28 @@ def compile_sample(
         "name": "scripted_followup",
         "followup_turns": [t["content"] for t in user_turns[1:]],
     }
+    augmentation = sample.get("augmentation")
+    sample_id = sample.get("sample_id")
+
     extra_info: JsonDict = {
         "split": split,
         "index": index,
-        "sample_id": sample.get("sample_id"),
-        "source_sample_id": sample.get("source_sample_id"),
+        "sample_id": sample_id,
+        # Canonical scenario label, resolved once here so every consumer
+        # (eval, debug viewers) reads the same field instead of each
+        # re-deriving it from sample_id conventions that differ by source.
+        # This is the *only* part of the source's scenario metadata (e.g.
+        # the augmentor's `augmentation` dict) that survives compilation --
+        # everything else has no downstream reader, so it is not carried
+        # into extra_info at all.
+        "data_type": infer_data_type(str(sample_id or ""), augmentation),
+        # Full multi-turn user conversation, independent of verl's
+        # ``prompt``/``raw_prompt`` split (which intentionally excludes
+        # follow-up turns from ``raw_prompt`` — see ScriptedFollowupInteraction).
+        # Offline consumers (spectune.rollout, spectune.rollout.eval) read
+        # this instead of guessing which verl column holds the full
+        # conversation.
+        "turns": user_turns,
         "format_spec": config.format_spec,
         "tool_names": list(tool_names),
         "need_tools_kwargs": bool(tool_names),
@@ -125,7 +163,10 @@ def compile_sample(
             extra_info["tool_schemas"] = [dict(schema) for schema in resolved_schemas]
 
     return {
-        "data_source": config.data_source,
+        # Per-file override from load_jsonl_files(data_sources=...), else the
+        # config-wide default -- lets one compile run tag NMRexp and "others"
+        # rows differently without a separate invocation per source file.
+        "data_source": sample.get("_data_source") or config.data_source,
         "agent_name": config.agent_name,
         "prompt": prompt,
         "raw_prompt": raw_prompt,
@@ -156,30 +197,12 @@ def iter_compiled_samples(
 
 def load_jsonl(path: str | Path) -> list[JsonDict]:
     """Load a Spectune JSONL dataset."""
-    records: list[JsonDict] = []
-    with Path(path).expanduser().open(encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            text = line.strip()
-            if not text:
-                continue
-            try:
-                value = json.loads(text)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"{path}:{line_number}: invalid JSON") from exc
-            if not isinstance(value, dict):
-                raise ValueError(f"{path}:{line_number}: expected a JSON object")
-            records.append(value)
-    return records
+    return _read_jsonl(path)
 
 
 def write_jsonl(records: Sequence[Mapping[str, Any]], path: str | Path) -> None:
     """Write compiled artifacts as JSONL (always available, no extra deps)."""
-    destination = Path(path).expanduser()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("w", encoding="utf-8") as handle:
-        for record in records:
-            handle.write(json.dumps(dict(record), ensure_ascii=False))
-            handle.write("\n")
+    _write_jsonl(path, records)
 
 
 def write_parquet(records: Sequence[Mapping[str, Any]], path: str | Path) -> None:
@@ -197,21 +220,89 @@ def write_parquet(records: Sequence[Mapping[str, Any]], path: str | Path) -> Non
     pd.DataFrame([dict(record) for record in records]).to_parquet(destination, index=False)
 
 
+def load_jsonl_files(
+    paths: str | Path | Iterable[str | Path],
+    *,
+    shuffle: bool = True,
+    seed: int | None = None,
+    data_sources: str | Sequence[str] | None = None,
+) -> list[JsonDict]:
+    """Load one or more Spectune JSONL files and merge them into one list.
+
+    When multiple ``paths`` are given, records from all files are concatenated
+    and then shuffled together (``shuffle=True`` by default) so downstream
+    consumers see an interleaved mix rather than each source's rows in a
+    contiguous block. Pass ``seed`` for a reproducible shuffle order.
+
+    ``data_sources``, when given, tags every record loaded from a given path
+    with that path's own ``data_source`` (stashed under the private
+    ``"_data_source"`` key, read by :func:`compile_sample` to override
+    ``config.data_source`` just for that row) -- e.g. compile the NMRexp
+    augmentor output and the "others" SFT pool in one run while still telling
+    them apart downstream. Pass one value (broadcast to every path) or
+    exactly one value per path; omit to leave every row on ``config.data_source``.
+    """
+    if isinstance(paths, str | Path):
+        path_list: list[str | Path] = [paths]
+    else:
+        path_list = list(paths)
+    if not path_list:
+        raise ValueError("at least one input path is required")
+
+    if data_sources is None:
+        source_list: list[str | None] = [None] * len(path_list)
+    elif isinstance(data_sources, str):
+        source_list = [data_sources] * len(path_list)
+    else:
+        source_list = list(data_sources)
+        if len(source_list) == 1:
+            source_list = source_list * len(path_list)
+        elif len(source_list) != len(path_list):
+            raise ValueError(
+                f"got {len(source_list)} data_sources for {len(path_list)} input paths; "
+                "pass exactly one (broadcast to all) or one per path"
+            )
+
+    records: list[JsonDict] = []
+    for path, source in zip(path_list, source_list, strict=True):
+        loaded = load_jsonl(path)
+        if source is not None:
+            for record in loaded:
+                record["_data_source"] = source
+        records.extend(loaded)
+
+    if shuffle:
+        rng = random.Random(seed)
+        rng.shuffle(records)
+
+    return records
+
+
 def compile_jsonl_file(
-    input_path: str | Path,
+    input_path: str | Path | Iterable[str | Path],
     output_path: str | Path,
     *,
     split: str = "train",
     config: ArtifactCompileConfig | None = None,
     tool_schemas: Sequence[Mapping[str, Any]] | None = None,
     fmt: str | None = None,
+    shuffle: bool = True,
+    seed: int | None = None,
+    data_sources: str | Sequence[str] | None = None,
 ) -> int:
-    """Compile a Spectune JSONL file to JSONL or parquet artifacts.
+    """Compile a Spectune JSONL file (or files) to JSONL or parquet artifacts.
+
+    ``input_path`` accepts a single path or an iterable of paths. When
+    multiple paths are given, their samples are merged and shuffled together
+    (see ``load_jsonl_files``) before being compiled into one output file.
+    ``data_sources`` optionally tags each input path's rows with its own
+    ``data_source`` value instead of ``config.data_source`` uniformly (see
+    ``load_jsonl_files``).
 
     ``fmt`` defaults to the output suffix (``.parquet`` or ``.jsonl``).
     """
     config = config or ArtifactCompileConfig()
-    samples = load_jsonl(input_path)
+    samples = load_jsonl_files(input_path, shuffle=shuffle, seed=seed, data_sources=data_sources)
     records = list(
         iter_compiled_samples(
             samples,
@@ -259,8 +350,10 @@ __all__ = [
     "compile_jsonl_file",
     "compile_sample",
     "config_to_dict",
+    "infer_data_type",
     "iter_compiled_samples",
     "load_jsonl",
+    "load_jsonl_files",
     "write_interaction_config",
     "write_jsonl",
     "write_parquet",

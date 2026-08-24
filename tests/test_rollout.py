@@ -6,7 +6,7 @@ import pytest
 from spectune.format.v1 import format_final_answer
 from spectune.llm import LlmClientProtocol, LlmConfig
 from spectune.reward import RewardEvaluator
-from spectune.rollout import Rollout, RolloutConfig
+from spectune.rollout import Rollout, RolloutConfig, RolloutRecord, compute_hit_at_k_metrics
 from spectune.rollout.sampling.rejection import GtRejectionSampler
 from spectune.tools.base import ToolResult
 from spectune.tools.config import NMR_GENERATE_MAX_TOPK
@@ -181,6 +181,40 @@ class TestGtRejectionSampler:
         response = format_final_answer(["CCO"])
 
         assert sampler.accept(response, {"gt_smiles": ""}) is False
+
+
+class TestHitAtKMetrics:
+    @staticmethod
+    def _record(rank, candidates):
+        return RolloutRecord(
+            sample_id=str(rank),
+            gt_smiles="CCO",
+            messages=[],
+            reward_score=0.0,
+            reward_details={"gt_rank": rank, "canonical_candidates": candidates},
+            n_rounds=1,
+        )
+
+    def test_reports_every_k_and_counts_failed_rollouts_as_misses(self):
+        records = [
+            self._record(1, ["CCO", "CCC", "CCN"]),
+            self._record(3, ["CCC", "CCN", "CCO"]),
+            self._record(None, ["CCC", "CCN"]),
+        ]
+
+        metrics = compute_hit_at_k_metrics(records, total_samples=4)
+
+        assert metrics["num_samples"] == 4
+        assert metrics["num_completed"] == 3
+        assert metrics["max_k"] == 3
+        assert metrics["hit@1"] == pytest.approx(0.25)
+        assert metrics["hit@2"] == pytest.approx(0.25)
+        assert metrics["hit@3"] == pytest.approx(0.5)
+        assert metrics["hit@all"] == pytest.approx(0.5)
+
+    def test_rejects_a_denominator_smaller_than_completed_records(self):
+        with pytest.raises(ValueError, match="total_samples"):
+            compute_hit_at_k_metrics([self._record(1, ["CCO"])], total_samples=0)
 
 
 class TestRolloutConfigValidation:

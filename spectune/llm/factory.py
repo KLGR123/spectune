@@ -7,9 +7,10 @@ Set ``SPECTUNE_LLM_BACKEND`` in the environment (typically via
   ``SPECTUNE_LLM_BASE_URL`` / ``SPECTUNE_LLM_MODEL``.
 - ``"litellm"`` -- :class:`~spectune.llm.litellm.LitellmClient` against
   ``LITELLM_API_BASE`` / ``LITELLM_MODEL``.
-- ``"local"`` -- auto-starts a local vLLM server using
-  ``SPECTUNE_LLM_MODEL`` as the model path; handled in the CLI layer,
-  not by this factory (calling ``create_llm_client("local")`` raises).
+- ``"local"`` -- auto-starts a local vLLM server for a model path passed via
+  ``--model`` (no env var; which local weights to serve is a per-run CLI
+  choice, not a secrets.env setting); handled in the CLI layer, not by this
+  factory (calling ``create_llm_client("local")`` raises).
 
 :class:`~spectune.rollout.rollout.Rollout` and
 :class:`~spectune.augmentor.augmentor.Augmentor` both accept a pre-built

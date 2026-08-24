@@ -7,11 +7,24 @@ its own config here, and none of this is consumed by :class:`~spectune.tools.man
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal
+
+
+def default_datasets_dir() -> str:
+    """Resolve the shared dataset cache/output directory.
+
+    Every stage that reads or writes files under this directory (dataloader
+    truth caches, the augmentor's enrichment cache and JSONL output, ...)
+    resolves the same plain default through this one function, so overriding
+    it once (via ``--datasets-dir`` on any entry point, or the
+    ``processed_dir``/``datasets_dir`` config field directly) moves all of
+    them together instead of each stage guessing its own default.
+    """
+    return "outputs/datasets"
+
 
 _DEFAULT_NMREXP_SOURCES: Mapping[str, str] = MappingProxyType(
     {
@@ -26,8 +39,14 @@ _DEFAULT_NMREXP_SOURCES: Mapping[str, str] = MappingProxyType(
 )
 _DEFAULT_NMREXP_TRUTH_SPLITS: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
-        "train": ("raw",),
-        "test": (
+        # Named after data *provenance*, not the eventual RL-train/eval-test
+        # role a sampled row ends up playing -- ``spectune.augmentor`` draws
+        # all of its train/test/sft output splits from the same truth split
+        # (by default "bulk"), so a truth-split name of "train"/"test" would
+        # bleed into every downstream ``sample_id`` and be read as "this row
+        # is training data", regardless of which output split it lands in.
+        "bulk": ("raw",),
+        "verified": (
             "checked",
             "checked_boron",
             "checked_fluorine",
@@ -45,15 +64,18 @@ class NmrExpDataLoaderConfig:
 
     ``raw_dir`` holds the raw NMRexp exports (the large unchecked ``raw``
     parquet plus the small human-checked CSV exports); ``processed_dir`` is
-    where ``preprocess()`` caches normalized JSON-Lines truth files. Both
-    default to this cluster's layout but are fully overridable.
+    where ``preprocess()`` caches normalized JSON-Lines truth files. Both have
+    plain placeholder defaults; pass explicit values (or ``--raw-dir``/
+    ``--datasets-dir`` on the CLI entry points) for anything but a quick local test.
 
     ``sources`` maps source names to raw filenames under ``raw_dir``.
     ``truth_splits`` assigns those sources to output truth splits. By default,
-    the raw parquet becomes ``nmrexp_truth_train.jsonl`` and all checked CSV
-    sources are merged into ``nmrexp_truth_test.jsonl``. These remain *truth*
-    splits: downstream code will independently combine each with sampled seeds
-    to produce the final train/test datasets.
+    the raw parquet becomes ``nmrexp_truth_bulk.jsonl`` and all checked CSV
+    sources are merged into ``nmrexp_truth_verified.jsonl``. These remain
+    *truth* splits, named after provenance (bulk/unverified vs. small/human-
+    verified) rather than train/test role: downstream code (the augmentor)
+    independently samples and slices whichever truth split it is pointed at
+    to produce the final train/test/sft datasets.
 
     Add entries to both mappings (or pass replacements) to ingest additional
     sources. ``min_quality``/``drop_qc_wrong`` only affect checked CSV sources,
@@ -68,8 +90,8 @@ class NmrExpDataLoaderConfig:
     additionally expose ``merged_sample_ids``.
     """
 
-    raw_dir: str = field(default_factory=lambda: os.getenv("NMREXP_RAW_DIR", "/root/data/NMRexp"))
-    processed_dir: str = field(default_factory=lambda: os.getenv("SPECTUNE_DATASETS_DIR", "./datasets"))
+    raw_dir: str = "/root/data/NMRexp"
+    processed_dir: str = field(default_factory=default_datasets_dir)
     dataset_name: str = "NMRexp"
     sources: Mapping[str, str] = field(default_factory=lambda: _DEFAULT_NMREXP_SOURCES)
     truth_splits: Mapping[str, tuple[str, ...]] = field(default_factory=lambda: _DEFAULT_NMREXP_TRUTH_SPLITS)
@@ -81,4 +103,4 @@ class NmrExpDataLoaderConfig:
     show_progress: bool = True
 
 
-__all__ = ["NmrExpDataLoaderConfig"]
+__all__ = ["NmrExpDataLoaderConfig", "default_datasets_dir"]

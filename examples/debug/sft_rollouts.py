@@ -7,13 +7,11 @@ import pandas as pd
 from flask import Flask, jsonify, render_template_string, request
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PARQUET = (
-    ROOT / "outputs" / "datasets" / "verl" / "nmrexp_sft_rollout_qwen3_max_w_rs_2_topk_15.parquet"
-)
+DEFAULT_PARQUET_DIR = ROOT / "outputs" / "datasets" / "sft"
 
 app = Flask(__name__)
-PARQUET_PATH: Path = DEFAULT_PARQUET
-_df_cache: list[dict] | None = None
+PARQUET_DIR: Path = DEFAULT_PARQUET_DIR
+_df_cache: dict[str, list[dict]] = {}
 
 
 def parse_output_segments(raw: str) -> list[dict]:
@@ -78,12 +76,12 @@ def parse_output_segments(raw: str) -> list[dict]:
     return segments
 
 
-def load_df() -> list[dict]:
-    global _df_cache
-    if _df_cache is not None:
-        return _df_cache
+def load_df(source: str) -> list[dict]:
+    if source in _df_cache:
+        return _df_cache[source]
 
-    df = pd.read_parquet(PARQUET_PATH)
+    path = PARQUET_DIR / f"{source}.parquet"
+    df = pd.read_parquet(path)
     records = []
     for idx, row in df.iterrows():
         messages = row["messages"]
@@ -94,7 +92,6 @@ def load_df() -> list[dict]:
             if role == "system":
                 turns.append({"role": "system", "segments": [{"type": "text", "content": content}]})
             elif role == "user":
-                # detect pure tool_response wrappers
                 stripped = content.strip()
                 if stripped.startswith("<tool_response>"):
                     inner = re.sub(
@@ -129,7 +126,7 @@ def load_df() -> list[dict]:
             }
         )
 
-    _df_cache = records
+    _df_cache[source] = records
     return records
 
 
@@ -137,7 +134,7 @@ HTML = r"""<!doctype html>
 <html lang="zh">
 <head>
 <meta charset="utf-8"/>
-<title>Rollout Viewer</title>
+<title>SFT Teacher Rollouts Viewer</title>
 <style>
   :root {
     --bg: #f6f8fa; --panel: #fff; --border: #d0d7de;
@@ -152,6 +149,20 @@ HTML = r"""<!doctype html>
            display: flex; align-items: center; gap: 16px; }
   header h1 { font-size: 16px; font-weight: 600; }
   header .sub { font-size: 12px; color: #aaa; }
+
+  .layout { display: flex; height: calc(100vh - 44px); overflow: hidden; }
+
+  #sidebar { width: 260px; min-width: 180px; border-right: 1px solid var(--border);
+             overflow-y: auto; background: var(--panel); flex-shrink: 0; }
+  .sidebar-header { padding: 8px 12px; font-size: 11px; font-weight: 600; color: var(--gray);
+                    text-transform: uppercase; letter-spacing: .05em;
+                    border-bottom: 1px solid var(--border); }
+  .exp-item { padding: 8px 14px; cursor: pointer; font-size: 13px; color: #24292f;
+              border-bottom: 1px solid var(--border); word-break: break-all; line-height: 1.4; }
+  .exp-item:hover { background: #f0f6ff; }
+  .exp-item.active { background: #dbeafe; font-weight: 600; color: var(--blue); }
+
+  #main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
 
   #controls { padding: 10px 16px; border-bottom: 1px solid var(--border);
               background: var(--panel); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -168,7 +179,7 @@ HTML = r"""<!doctype html>
   #goto-btn { font-size: 13px; padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border);
               background: #6e7781; color: #fff; cursor: pointer; font-weight: 600; }
   #goto-btn:hover { background: #57606a; }
-  #viewer { padding: 16px; }
+  #viewer { padding: 16px; flex: 1; }
 
   .traj-card { background: var(--panel); border: 1px solid var(--border);
                border-radius: 8px; margin-bottom: 24px; overflow: hidden; }
@@ -196,7 +207,6 @@ HTML = r"""<!doctype html>
   .section-content { padding: 12px 14px; font-size: 13px; }
   .section-content.hidden { display: none; }
 
-  /* turn blocks */
   .turn { margin-bottom: 10px; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); }
   .turn-label { padding: 4px 12px; font-size: 11px; font-weight: 700;
                 letter-spacing: .06em; text-transform: uppercase; }
@@ -222,33 +232,70 @@ HTML = r"""<!doctype html>
 </head>
 <body>
 <header>
-  <h1>Rollout Viewer</h1>
-  <span class="sub">{{ parquet_path }}</span>
+  <h1>SFT Teacher Rollouts Viewer</h1>
+  <span class="sub">{{ parquet_dir }}</span>
 </header>
-<div id="controls">
-  <label>Filter score ≥</label>
-  <input type="number" id="min-score" value="-99" step="0.05" style="width:70px"/>
-  <button id="dice-btn" onclick="rollOne()">🎲 Roll</button>
-  <input type="number" id="goto-input" placeholder="# index" min="1"
-         onkeydown="if(event.key==='Enter') goToIndex()"/>
-  <button id="goto-btn" onclick="goToIndex()">Go</button>
-  <span id="traj-counter"></span>
+<div class="layout">
+  <div id="sidebar">
+    <div class="sidebar-header">Datasets</div>
+    <div id="src-list"><div style="padding:16px;color:var(--gray);font-size:13px">Loading…</div></div>
+  </div>
+  <div id="main">
+    <div id="controls">
+      <label>Filter score ≥</label>
+      <input type="number" id="min-score" value="-99" step="0.05" style="width:70px"/>
+      <button id="dice-btn" onclick="rollOne()">🎲 Roll</button>
+      <input type="number" id="goto-input" placeholder="# index" min="1"
+             onkeydown="if(event.key==='Enter') goToIndex()"/>
+      <button id="goto-btn" onclick="goToIndex()">Go</button>
+      <span id="traj-counter"></span>
+    </div>
+    <div id="viewer"><p style="color:var(--gray);padding:24px">← Select a dataset from the sidebar</p></div>
+  </div>
 </div>
-<div id="viewer"><p style="color:var(--gray);padding:24px">Loading…</p></div>
 
 <script>
+let currentSource = '';
 let totalCount = 0;
 
-fetch('/api/count')
-  .then(r => r.json())
-  .then(d => { totalCount = d.count; rollOne(); });
+fetch('/api/sources').then(r => r.json()).then(sources => {
+  const list = document.getElementById('src-list');
+  if (!sources.length) {
+    list.innerHTML = '<div style="padding:16px;color:var(--gray);font-size:13px">No parquet files found</div>';
+    return;
+  }
+  list.innerHTML = sources.map(s =>
+    `<div class="exp-item" onclick="loadSource('${escAttr(s)}', this)">${escHtml(s)}</div>`
+  ).join('');
+  list.querySelector('.exp-item').click();
+});
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function escAttr(s) {
+  return String(s).replace(/'/g, "\\'");
+}
+
+function loadSource(source, el) {
+  document.querySelectorAll('.exp-item').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  currentSource = source;
+  totalCount = 0;
+  document.getElementById('traj-counter').textContent = '';
+  document.getElementById('viewer').innerHTML = '<p style="color:var(--gray);padding:24px">Loading…</p>';
+  fetch(`/api/count?source=${encodeURIComponent(source)}`)
+    .then(r => r.json())
+    .then(d => { totalCount = d.count; rollOne(); });
+}
 
 function rollOne() {
+  if (!currentSource) return;
   const minScore = parseFloat(document.getElementById('min-score').value) || -99;
   const btn = document.getElementById('dice-btn');
   btn.disabled = true;
   btn.textContent = '…';
-  fetch(`/api/random?min_score=${minScore}`)
+  fetch(`/api/random?source=${encodeURIComponent(currentSource)}&min_score=${minScore}`)
     .then(r => r.json())
     .then(t => {
       btn.disabled = false;
@@ -264,9 +311,10 @@ function rollOne() {
 }
 
 function goToIndex() {
+  if (!currentSource) return;
   const val = parseInt(document.getElementById('goto-input').value);
   if (isNaN(val) || val < 1) return;
-  fetch(`/api/get?idx=${val}`)
+  fetch(`/api/get?source=${encodeURIComponent(currentSource)}&idx=${val}`)
     .then(r => r.json())
     .then(t => {
       if (!t) {
@@ -277,10 +325,6 @@ function goToIndex() {
       document.getElementById('traj-counter').textContent = `#${t.index + 1} / ${totalCount} total`;
       document.getElementById('viewer').innerHTML = renderTraj(t);
     });
-}
-
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function scoreBadgeClass(s) {
@@ -356,31 +400,35 @@ function toggleSection(titleEl) {
 
 @app.route("/")
 def index():
-    return render_template_string(HTML, parquet_path=str(PARQUET_PATH))
+    return render_template_string(HTML, parquet_dir=str(PARQUET_DIR))
+
+
+@app.route("/api/sources")
+def api_sources():
+    if not PARQUET_DIR.exists():
+        return jsonify([])
+    sources = sorted(p.stem for p in PARQUET_DIR.glob("*.parquet"))
+    return jsonify(sources)
 
 
 @app.route("/api/count")
 def api_count():
-    records = load_df()
+    source = request.args.get("source", "")
+    if not source:
+        return jsonify({"count": 0})
+    records = load_df(source)
     return jsonify({"count": len(records)})
-
-
-@app.route("/api/data")
-def api_data():
-    page = int(request.args.get("page", 0))
-    page_size = int(request.args.get("page_size", 0))  # 0 = all
-    records = load_df()
-    if page_size > 0:
-        records = records[page * page_size : (page + 1) * page_size]
-    return jsonify(records)
 
 
 @app.route("/api/random")
 def api_random():
     import random
 
+    source = request.args.get("source", "")
+    if not source:
+        return jsonify(None)
     min_score = float(request.args.get("min_score", -99))
-    records = load_df()
+    records = load_df(source)
     filtered = [r for r in records if r["score"] >= min_score]
     if not filtered:
         return jsonify(None)
@@ -389,20 +437,23 @@ def api_random():
 
 @app.route("/api/get")
 def api_get():
+    source = request.args.get("source", "")
+    if not source:
+        return jsonify(None)
     idx = int(request.args.get("idx", 0))
-    records = load_df()
+    records = load_df(source)
     match = next((r for r in records if r["index"] + 1 == idx), None)
     return jsonify(match)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", type=int, default=7861)
+    parser.add_argument("--port", type=int, default=7862)
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--parquet", default=str(DEFAULT_PARQUET))
+    parser.add_argument("--parquet-dir", default=str(DEFAULT_PARQUET_DIR))
     args = parser.parse_args()
 
-    PARQUET_PATH = Path(args.parquet).resolve()
-    print(f"Serving rollout data from: {PARQUET_PATH}")
+    PARQUET_DIR = Path(args.parquet_dir).resolve()
+    print(f"Serving rollout data from: {PARQUET_DIR}")
     print(f"Open http://localhost:{args.port}")
     app.run(host=args.host, port=args.port, debug=False)

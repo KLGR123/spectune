@@ -23,13 +23,13 @@ _NMR = {
 
 def _truth_record(index=0, smiles="CNS(=O)(=O)c1cccc(C(=O)OC)c1", formula="C9H11NO4S"):
     return {
-        "sample_id": f"NMRexp:test:checked:{index}",
+        "sample_id": f"NMRexp:verified:checked:{index}",
         "modality": "nmr",
         "gt_smiles": smiles,
         "molecular_formula": formula,
         "nmr": dict(_NMR),
         "ms": None,
-        "provenance": {"dataset": "NMRexp", "split": "test"},
+        "provenance": {"dataset": "NMRexp", "split": "verified"},
         "quality": None,
         "cluster": index % 3,
     }
@@ -50,7 +50,7 @@ def _offline_enrichment(tmp_path, **overrides):
 
 def _config(tmp_path, **overrides):
     settings = {
-        "split": "test",
+        "split": "verified",
         "seed": 5,
         "show_progress": False,
         "datasets_dir": str(tmp_path),
@@ -87,6 +87,24 @@ class TestConfigValidation:
     def test_unknown_reaction_source_is_rejected(self):
         with pytest.raises(ValueError, match="unknown reaction source"):
             EnrichmentConfig(reaction_sources=("reaxys",))
+
+    def test_datasets_dir_override_also_moves_the_default_enrichment_cache(self, tmp_path):
+        # enrichment.cache_path defaults independently of datasets_dir (it can be
+        # constructed standalone), so overriding just datasets_dir -- as
+        # `python -m spectune.augmentor --datasets-dir ...` does -- must still
+        # re-point the nested default cache path instead of leaving it under
+        # whatever the plain "outputs/datasets" default resolved to.
+        custom_dir = str(tmp_path / "custom_datasets")
+        config = AugmentorConfig(datasets_dir=custom_dir)
+        assert config.enrichment.cache_path == str(tmp_path / "custom_datasets" / "enrichment.jsonl")
+
+    def test_explicit_enrichment_cache_path_is_not_overridden_by_datasets_dir(self, tmp_path):
+        explicit_cache = str(tmp_path / "explicit_cache.jsonl")
+        config = AugmentorConfig(
+            datasets_dir=str(tmp_path / "custom_datasets"),
+            enrichment=EnrichmentConfig(cache_path=explicit_cache),
+        )
+        assert config.enrichment.cache_path == explicit_cache
 
 
 class TestSpectrumTextAndNoise:
@@ -459,6 +477,11 @@ class TestLlmClient:
 
 @pytest.mark.skipif(not _HAS_RDKIT, reason="rdkit is not installed")
 class TestAugmentorConstruction:
+    """Records written to disk are the slim ``{sample_id, gt_smiles, turns,
+    augmentation}`` shape (see ``Augmentor._assemble``); every other draw the
+    planner made only survives as an aggregate in ``last_summary`` (or is
+    inspectable directly on the ``_plan()`` dict for per-row detail)."""
+
     def test_spectrum_only_mixture_produces_single_turn_queries(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}))
 
@@ -466,9 +489,8 @@ class TestAugmentorConstruction:
 
         assert len(dataset) == 6
         for record in dataset:
-            assert record["num_of_queries"] == 1
+            assert len(record["turns"]) == 1
             assert record["augmentation"]["information_type"] == "none"
-            assert record["nmr_text"] in record["turns"][0]["content"]
 
     def test_formula_mixture_always_states_the_formula(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path, information_mix={"formula": 1.0}, followup_probability=0.0))
@@ -489,26 +511,23 @@ class TestAugmentorConstruction:
             )
         )
 
+        plan = augmentor._plan(_truth_record(0), 0)
+        assert plan["formula_noise"]["applied"] is True
+        assert plan["formula_noise"]["original_formula"] == "C9H11NO4S"
+        assert plan["formula_noise"]["perturbed_formula"] != "C9H11NO4S"
+
         dataset = augmentor.build([_truth_record(i) for i in range(5)])
 
         for record in dataset:
-            detail = record["augmentation"]["formula_noise_detail"]
-            presented = record["augmentation"]["information_detail"]["formula"]
-            assert record["molecular_formula"] == "C9H11NO4S"
-            assert record["augmentation"]["formula_noise_applied"] is True
-            assert detail["original_formula"] == "C9H11NO4S"
-            assert detail["perturbed_formula"] == presented
-            assert presented != "C9H11NO4S"
-            assert presented in record["turns"][0]["content"]
+            assert "C9H11NO4S" not in record["turns"][0]["content"]
         assert augmentor.last_summary["formula_noise_eligible"] == 5
         assert augmentor.last_summary["formula_noised"] == 5
 
     def test_formula_noise_does_not_apply_without_a_formula_condition(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, formula_noise_ratio=1.0))
 
-        dataset = augmentor.build([_truth_record(i) for i in range(3)])
+        augmentor.build([_truth_record(i) for i in range(3)])
 
-        assert all(not record["augmentation"]["formula_noise_applied"] for record in dataset)
         assert augmentor.last_summary["formula_noise_eligible"] == 0
         assert augmentor.last_summary["formula_noised"] == 0
 
@@ -518,20 +537,22 @@ class TestAugmentorConstruction:
         dataset = augmentor.build([_truth_record(i) for i in range(6)])
 
         for record in dataset:
-            assert record["num_of_queries"] == 2
+            assert len(record["turns"]) == 2
             assert "C9H11NO4S" not in record["turns"][0]["content"]
             assert "C9H11NO4S" in record["turns"][1]["content"]
-            assert record["augmentation"]["information_placement"] == "followup"
+        assert augmentor.last_summary["placements"] == {"followup": 6}
 
     def test_structure_hint_is_phrased_with_hedging(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path, information_mix={"structure": 1.0}, followup_probability=0.0))
+
+        plan = augmentor._plan(_truth_record(0), 0)
+        assert plan["uncertain"] is True
+        assert plan["information_detail"]["structure_kind"] == "smiles"
 
         dataset = augmentor.build([_truth_record(i) for i in range(6)])
 
         for record in dataset:
             assert record["gt_smiles"] in record["turns"][0]["content"]
-            assert record["augmentation"]["uncertain_tone"] is True
-            assert record["augmentation"]["information_detail"]["structure_kind"] == "smiles"
 
     def test_partial_names_are_never_used_as_structure_conditions(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path))
@@ -591,19 +612,15 @@ class TestAugmentorConstruction:
 
         built = augmentor.build([record])[0]
 
-        assert built["augmentation"]["requested_information_type"] == "formula"
         assert built["augmentation"]["information_type"] == "none"
-        assert built["augmentation"]["information_available"] is False
-        assert built["augmentation"]["information_degraded"] is True
-        assert built["num_of_queries"] == 1
+        assert len(built["turns"]) == 1
         assert augmentor.last_summary["information_degraded"] == 1
 
     def test_spectrum_only_rows_are_not_reported_as_degraded(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}))
 
-        dataset = augmentor.build([_truth_record(i) for i in range(3)])
+        augmentor.build([_truth_record(i) for i in range(3)])
 
-        assert all(not record["augmentation"]["information_degraded"] for record in dataset)
         assert augmentor.last_summary["information_degraded"] == 0
 
     def test_noise_ratio_one_noises_every_spectrum(self, tmp_path):
@@ -617,24 +634,18 @@ class TestAugmentorConstruction:
             )
         )
 
-        dataset = augmentor.build([_truth_record(i) for i in range(5)])
+        augmentor.build([_truth_record(i) for i in range(5)])
 
-        for record in dataset:
-            assert record["augmentation"]["nmr_noise_applied"] is True
-            assert record["augmentation"]["nmr_noise_mode"] == "drop_peaks"
-            assert record["augmentation"]["nmr_noise_detail"]["changed"] is True
-            assert record["nmr_text"] != record["nmr_text_clean"]
-            assert record["nmr_text"] in record["turns"][0]["content"]
+        assert augmentor.last_summary["noised"] == {"drop_peaks": 5}
 
     def test_zero_noise_ratio_leaves_every_spectrum_intact(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, nmr_noise_ratio=0.0))
 
-        dataset = augmentor.build([_truth_record(i) for i in range(5)])
+        augmentor.build([_truth_record(i) for i in range(5)])
 
-        assert all(not record["augmentation"]["nmr_noise_applied"] for record in dataset)
-        assert all(record["nmr_text"] == record["nmr_text_clean"] for record in dataset)
+        assert augmentor.last_summary["noised"] == {}
 
-    def test_records_carry_analysis_attributes_and_are_written_to_disk(self, tmp_path):
+    def test_records_are_slim_and_written_to_disk(self, tmp_path):
         output = tmp_path / "augmented.jsonl"
         augmentor = Augmentor(_config(tmp_path, information_mix={"fragment": 1.0}))
 
@@ -643,20 +654,10 @@ class TestAugmentorConstruction:
         written = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines()]
         assert len(written) == len(dataset) == 3
         record = written[0]
-        assert record["source_sample_id"] == "NMRexp:test:checked:0"
-        assert record["gt_smiles"] and record["molecular_weight"]
-        assert record["enrichment"]["fragments"]
-        assert set(record["augmentation"]) >= {
-            "information_type",
-            "information_placement",
-            "information_available",
-            "uncertain_tone",
-            "llm_rewritten",
-            "llm_status",
-            "nmr_noise_applied",
-            "num_fragments",
-            "has_reaction_precedent",
-        }
+        assert set(record) == {"sample_id", "gt_smiles", "turns", "augmentation"}
+        assert record["sample_id"] == "NMRexp:verified:checked:0:aug"
+        assert record["gt_smiles"]
+        assert set(record["augmentation"]) == {"information_type"}
         assert augmentor.last_summary["information_types"] == {"fragment": 3}
 
     def test_sampling_respects_the_requested_size(self, tmp_path):
@@ -691,12 +692,12 @@ class TestLlmRewriting:
                 raw_query_ratio=0.0,
                 llm=LlmConfig(base_url=url.removesuffix("/chat/completions"), model="test-model"),
             )
-            dataset = Augmentor(config).build([_truth_record(i) for i in range(4)])
+            augmentor = Augmentor(config)
+            dataset = augmentor.build([_truth_record(i) for i in range(4)])
 
         for record in dataset:
-            assert record["augmentation"]["llm_rewritten"] is True
             assert record["turns"][0]["content"].startswith("帮我看下这个：")
-            assert record["nmr_text"] in record["turns"][0]["content"]
+        assert augmentor.last_summary["llm_rewritten"] == len(dataset)
 
     def test_rewrite_that_drops_the_spectrum_is_rejected_for_the_template(self, tmp_path):
         with run_mock_json_server(
@@ -710,12 +711,11 @@ class TestLlmRewriting:
                 raw_query_ratio=0.0,
                 llm=LlmConfig(base_url=url.removesuffix("/chat/completions"), model="test-model"),
             )
-            dataset = Augmentor(config).build([_truth_record(i) for i in range(3)])
+            augmentor = Augmentor(config)
+            dataset = augmentor.build([_truth_record(i) for i in range(3)])
 
-        for record in dataset:
-            assert record["augmentation"]["llm_status"] == "rejected_information_loss"
-            assert record["augmentation"]["llm_rewritten"] is False
-            assert record["nmr_text"] in record["turns"][0]["content"]
+        assert augmentor.last_summary["llm_rejected"] == len(dataset)
+        assert augmentor.last_summary["llm_rewritten"] == 0
 
     def test_raw_query_ratio_one_never_calls_the_model(self, tmp_path):
         with run_mock_json_server(
@@ -730,10 +730,11 @@ class TestLlmRewriting:
                 llm=LlmConfig(base_url=url.removesuffix("/chat/completions"), model="test-model"),
             )
             augmentor = Augmentor(config)
-            dataset = augmentor.build([_truth_record(i) for i in range(3)])
+            augmentor.build([_truth_record(i) for i in range(3)])
 
         assert augmentor.llm.stats["requests"] == 0
-        assert all(record["augmentation"]["llm_status"] == "template" for record in dataset)
+        assert augmentor.last_summary["llm_rewritten"] == 0
+        assert augmentor.last_summary["llm_rejected"] == 0
 
 
 @pytest.mark.skipif(not _HAS_RDKIT, reason="rdkit is not installed")
@@ -839,11 +840,10 @@ class TestMultimodalSpectrumText:
         dataset = augmentor.build([_multimodal_truth_record(i) for i in range(4)])
 
         for record in dataset:
-            assert "1H NMR" in record["nmr_text"]
-            assert "13C NMR" in record["nmr_text"]
-            assert record["augmentation"]["num_active_modalities"] == 2
-            assert record["augmentation"]["modal_drop_applied"] is False
-            assert record["active_nmr_list"] == record["nmr_list"]
+            content = record["turns"][0]["content"]
+            assert "1H NMR" in content
+            assert "13C NMR" in content
+        assert augmentor.last_summary["modal_dropped"] == 0
 
     def test_modal_drop_ratio_one_drops_some_modalities(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, modal_drop_ratio=1.0))
@@ -851,36 +851,37 @@ class TestMultimodalSpectrumText:
         dataset = augmentor.build([_multimodal_truth_record(i) for i in range(6)])
 
         for record in dataset:
-            assert record["augmentation"]["modal_drop_applied"] is True
-            assert record["augmentation"]["num_active_modalities"] == 1
-            assert len(record["active_nmr_list"]) == 1
-            # at least one spectrum still in query
-            active_type = record["active_nmr_list"][0]["type"]
-            assert active_type in record["nmr_text"]
+            content = record["turns"][0]["content"]
+            # exactly one modality kept: at least one spectrum still in query,
+            # but not both (that's what "dropped" means here)
+            assert ("1H NMR" in content) != ("13C NMR" in content)
+        assert augmentor.last_summary["modal_dropped"] == 6
 
     def test_modal_drop_zero_never_drops(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, modal_drop_ratio=0.0))
 
         dataset = augmentor.build([_multimodal_truth_record(i) for i in range(4)])
 
-        assert all(not record["augmentation"]["modal_drop_applied"] for record in dataset)
-        assert all(record["augmentation"]["num_active_modalities"] == 2 for record in dataset)
+        for record in dataset:
+            content = record["turns"][0]["content"]
+            assert "1H NMR" in content and "13C NMR" in content
+        assert augmentor.last_summary["modal_dropped"] == 0
 
-    def test_modal_drop_preserves_full_nmr_list_on_record(self, tmp_path):
+    def test_modal_drop_plan_keeps_the_full_list_on_the_source_record(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, modal_drop_ratio=1.0))
+        record = _multimodal_truth_record(0)
 
-        dataset = augmentor.build([_multimodal_truth_record(0)])
+        plan = augmentor._plan(record, 0)
 
-        record = dataset[0]
-        assert len(record["nmr_list"]) == 2
-        assert len(record["active_nmr_list"]) == 1
+        assert len(record["nmr_list"]) == 2  # dropping never mutates the source record
+        assert len(plan["nmr_list"]) == 1  # only the kept modality is rendered into the query
 
     def test_modal_drop_on_single_modality_record_is_never_applied(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, modal_drop_ratio=1.0))
 
-        dataset = augmentor.build([_truth_record(i) for i in range(4)])
+        augmentor.build([_truth_record(i) for i in range(4)])
 
-        assert all(not record["augmentation"]["modal_drop_applied"] for record in dataset)
+        assert augmentor.last_summary["modal_dropped"] == 0
 
     def test_modal_dropped_count_in_summary(self, tmp_path):
         augmentor = Augmentor(_config(tmp_path, information_mix={"none": 1.0}, modal_drop_ratio=1.0))

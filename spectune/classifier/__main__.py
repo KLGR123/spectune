@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         metavar="DIR",
         default=None,
-        help="Directory for temporary files and visualization PNG (default: SPECTUNE_OUTPUT_DIR or ./outputs).",
+        help="Directory for temporary files and visualization PNG (default: ./outputs).",
     )
     p.add_argument(
         "--visualize",

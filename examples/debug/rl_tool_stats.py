@@ -3,10 +3,10 @@ import json
 import re
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_TRAJ_DIR = ROOT / "outputs" / "trajectories"
+DEFAULT_TRAJ_DIR = ROOT / "outputs" / "trajectories" / "spectune"
 
 app = Flask(__name__)
 TRAJ_DIR: Path = DEFAULT_TRAJ_DIR
@@ -65,22 +65,38 @@ HTML = r"""<!doctype html>
 <html lang="zh">
 <head>
 <meta charset="utf-8"/>
-<title>Tool Statistics – Spectune</title>
+<title>RL Tool Statistics</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
-  :root { --bg:#f6f8fa; --panel:#fff; --border:#d0d7de; --gray:#57606a; }
+  :root { --bg:#f6f8fa; --panel:#fff; --border:#d0d7de; --gray:#57606a; --blue:#0969da; }
   * { box-sizing:border-box; margin:0; padding:0; }
   body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
          background:var(--bg); color:#24292f; font-size:14px; }
   header { background:#24292f; color:#fff; padding:12px 24px;
            display:flex; align-items:center; gap:16px; }
   header h1 { font-size:16px; font-weight:600; }
+
+  .layout { display:flex; height:calc(100vh - 44px); overflow:hidden; }
+
+  #sidebar { width:260px; min-width:180px; border-right:1px solid var(--border);
+             overflow-y:auto; background:var(--panel); flex-shrink:0; }
+  .sidebar-header { padding:8px 12px; font-size:11px; font-weight:600; color:var(--gray);
+                    text-transform:uppercase; letter-spacing:.05em;
+                    border-bottom:1px solid var(--border); }
+  .exp-item { padding:8px 14px; cursor:pointer; font-size:13px; color:#24292f;
+              border-bottom:1px solid var(--border); word-break:break-all;
+              line-height:1.4; }
+  .exp-item:hover { background:#f0f6ff; }
+  .exp-item.active { background:#dbeafe; font-weight:600; color:var(--blue); }
+
+  #main { flex:1; overflow-y:auto; display:flex; flex-direction:column; }
   .controls { padding:10px 24px; background:var(--panel);
               border-bottom:1px solid var(--border);
               display:flex; align-items:center; gap:12px; }
   .controls label { font-size:13px; color:var(--gray);
                     display:flex; align-items:center; gap:8px; }
   .controls input[type=range] { width:160px; cursor:pointer; }
+  #empty-hint { padding:48px; color:var(--gray); font-size:14px; }
   .charts { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:16px; }
   .chart-card { background:var(--panel); border:1px solid var(--border);
                 border-radius:8px; padding:16px 16px 12px; }
@@ -90,23 +106,32 @@ HTML = r"""<!doctype html>
 </head>
 <body>
 <header>
-  <h1>Tool Statistics</h1>
+  <h1>RL Tool Statistics</h1>
   <span style="font-size:12px;color:#aaa;">{{ traj_dir }}</span>
 </header>
-<div class="controls">
-  <label>Smoothing
-    <input type="range" id="smooth" min="1" max="15" value="1"
-           oninput="document.getElementById('sv').textContent=this.value; redraw()"/>
-    <span id="sv">1</span>
-  </label>
-</div>
-<div class="charts">
-  <div class="chart-card"><h3>Tool Call Frequency</h3><canvas id="c1"></canvas></div>
-  <div class="chart-card"><h3>Tool Reward Sum (per file)</h3><canvas id="c2"></canvas></div>
-  <div class="chart-card"><h3>Tool Failure Rate</h3><canvas id="c3"></canvas></div>
-  <div class="chart-card"><h3>nmr_generate Answer Rank (positive-score only)</h3><canvas id="c4"></canvas></div>
-  <div class="chart-card"><h3>nmr_generate Tool Accuracy (all trajectories)</h3><canvas id="c5"></canvas></div>
-  <div class="chart-card"><h3>Tool Calls per Turn (first query vs. follow-up)</h3><canvas id="c6"></canvas></div>
+<div class="layout">
+  <div id="sidebar">
+    <div class="sidebar-header">Experiments</div>
+    <div id="exp-list"><div style="padding:16px;color:var(--gray);font-size:13px">Loading…</div></div>
+  </div>
+  <div id="main">
+    <div class="controls">
+      <label>Smoothing
+        <input type="range" id="smooth" min="1" max="15" value="1"
+               oninput="document.getElementById('sv').textContent=this.value; redraw()"/>
+        <span id="sv">1</span>
+      </label>
+    </div>
+    <div id="empty-hint">← Select an experiment from the sidebar</div>
+    <div class="charts" id="charts-grid" style="display:none">
+      <div class="chart-card"><h3>Tool Call Frequency</h3><canvas id="c1"></canvas></div>
+      <div class="chart-card"><h3>Tool Reward Sum (per file)</h3><canvas id="c2"></canvas></div>
+      <div class="chart-card"><h3>Tool Failure Rate</h3><canvas id="c3"></canvas></div>
+      <div class="chart-card"><h3>nmr_generate Answer Rank (positive-score only)</h3><canvas id="c4"></canvas></div>
+      <div class="chart-card"><h3>nmr_generate Tool Accuracy (all trajectories)</h3><canvas id="c5"></canvas></div>
+      <div class="chart-card"><h3>Tool Calls per Turn (first query vs. follow-up)</h3><canvas id="c6"></canvas></div>
+    </div>
+  </div>
 </div>
 <script>
 const PALETTE = [
@@ -154,7 +179,34 @@ function mkChart(id, datasets, labels, yLabel) {
 let charts = [];
 let rawData = null;
 
-fetch('/api/stats').then(r => r.json()).then(data => { rawData = data; redraw(); });
+fetch('/api/tree').then(r => r.json()).then(groups => {
+  const list = document.getElementById('exp-list');
+  if (!groups.length) {
+    list.innerHTML = '<div style="padding:16px;color:var(--gray);font-size:13px">No experiments found</div>';
+    return;
+  }
+  list.innerHTML = groups.map(g =>
+    `<div class="exp-item" onclick="loadGroup('${escAttr(g)}', this)">${escHtml(g)}</div>`
+  ).join('');
+  list.querySelector('.exp-item').click();
+});
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function escAttr(s) {
+  return String(s).replace(/'/g, "\\'");
+}
+
+function loadGroup(name, el) {
+  document.querySelectorAll('.exp-item').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('empty-hint').style.display = 'none';
+  document.getElementById('charts-grid').style.display = 'grid';
+  fetch('/api/stats?group=' + encodeURIComponent(name))
+    .then(r => r.json())
+    .then(data => { rawData = data; redraw(); });
+}
 
 function redraw() {
   if (!rawData) return;
@@ -186,14 +238,31 @@ def index():
     return render_template_string(HTML, traj_dir=str(TRAJ_DIR))
 
 
+@app.route("/api/tree")
+def api_tree():
+    if not TRAJ_DIR.exists():
+        return jsonify([])
+    groups = sorted(
+        d.name for d in TRAJ_DIR.iterdir()
+        if d.is_dir() and any(d.glob("*.jsonl"))
+    )
+    return jsonify(groups)
+
+
 @app.route("/api/stats")
 def api_stats():
+    group = request.args.get("group", "")
+    search_dir = (TRAJ_DIR / group) if group else TRAJ_DIR
+
     def sort_key(p: Path):
         return int(p.stem) if p.stem.isdigit() else p.stem
 
-    files = sorted(TRAJ_DIR.rglob("*.jsonl"), key=sort_key)
+    files = sorted(
+        search_dir.glob("*.jsonl") if group else search_dir.rglob("*.jsonl"),
+        key=sort_key,
+    )
     if not files:
-        return jsonify({"labels": [], "tool_freq": {}, "tool_reward": {}, "tool_fail": {}, "nmr_ranks": []})
+        return jsonify({"labels": [], "tool_freq": {}, "tool_reward": {}, "tool_fail": {}, "nmr_ranks": [], "nmr_acc": {}, "turn_tool_counts": {}})
 
     labels: list[str] = []
     per_file: list[dict] = []

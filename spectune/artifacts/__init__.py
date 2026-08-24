@@ -8,8 +8,10 @@ from .compile import (
     compile_jsonl_file,
     compile_sample,
     config_to_dict,
+    infer_data_type,
     iter_compiled_samples,
     load_jsonl,
+    load_jsonl_files,
     write_jsonl,
     write_parquet,
 )
@@ -22,8 +24,10 @@ __all__ = [
     "compile_jsonl_file",
     "compile_sample",
     "config_to_dict",
+    "infer_data_type",
     "iter_compiled_samples",
     "load_jsonl",
+    "load_jsonl_files",
     "write_jsonl",
     "write_parquet",
 ]

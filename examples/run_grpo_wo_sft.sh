@@ -4,16 +4,17 @@ set -xeuo pipefail
 
 NNODES=1
 NDEVICES_PER_NODE=8
-PROJECT_NAME=spectune
-EXPERIMENT_NAME=grpo-nmrexp-20k-qwen3-8b-base
+PROJECT_NAME=rl
+EXPERIMENT_NAME=grpo-nmrexp-20k-qwen3-8b
 
-# fill in the following paths
-export SPECTUNE_ROOT=/fs_mol/liujiarun/spectune
-export VERL_ROOT=/fs_mol/liujiarun/verl
-export TRAIN_FILE=$SPECTUNE_ROOT/outputs/datasets/verl/train.parquet
-export TEST_FILE=$SPECTUNE_ROOT/outputs/datasets/verl/test.parquet
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export SPECTUNE_ROOT="${SPECTUNE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+export VERL_ROOT="${VERL_ROOT:-$(cd "$(dirname "$SPECTUNE_ROOT")/verl" && pwd)}"
+
+export TRAIN_FILE=$SPECTUNE_ROOT/outputs/datasets/verl/train_nmrexp.parquet
+export TEST_FILE=$SPECTUNE_ROOT/outputs/datasets/verl/test_nmrexp.parquet
 export TOOL_CONFIG=$SPECTUNE_ROOT/outputs/datasets/verl/tools_config.yaml
-export MODEL_PATH=/fs_mol/liujiarun/models/qwen3-8b
+export MODEL_PATH=/fs_mol/liujiarun/models/qwen3-8b  # fill in your model path
 export TENSORBOARD_DIR=$SPECTUNE_ROOT/outputs/tensorboard/$PROJECT_NAME/$EXPERIMENT_NAME
 
 

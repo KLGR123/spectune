@@ -227,7 +227,9 @@ def json_dumps_tool_result_with_smiles(smiles_list: list[str]) -> str:
 
 
 def test_default_max_tool_calls_matches_agent_budget():
-    assert RewardConfig().max_tool_calls == 8
+    from spectune.rollout.config import DEFAULT_MAX_ASSISTANT_TURNS
+
+    assert RewardConfig().max_tool_calls == DEFAULT_MAX_ASSISTANT_TURNS
 
 
 def test_reward_config_rejects_positive_penalties():
