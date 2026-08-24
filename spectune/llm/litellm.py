@@ -51,18 +51,26 @@ class LitellmClient:
             return ""
         async with self._limiter():
             self.stats["requests"] += 1
-            for attempt in range(self.config.max_retries + 1):
+            drop_top_p = False
+            attempt = 0
+            while True:
                 try:
-                    response = await asyncio.to_thread(self._call, messages)
+                    response = await asyncio.to_thread(self._call, messages, drop_top_p=drop_top_p)
                     return str(response.choices[0].message.content or "").strip()
                 except Exception as exc:
                     self.last_error = f"{type(exc).__name__}: {exc}"
+                    # Some Bedrock-hosted models (e.g. Claude) reject requests that
+                    # set both `temperature` and `top_p`; drop `top_p` and retry
+                    # right away, without counting against max_retries.
+                    if not drop_top_p and "cannot both be specified" in str(exc):
+                        drop_top_p = True
+                        continue
                     if attempt >= self.config.max_retries:
                         self.stats["failures"] += 1
                         return ""
+                    attempt += 1
                     self.stats["retries"] += 1
-                    await asyncio.sleep(1.5 * (attempt + 1))
-        return ""
+                    await asyncio.sleep(1.5 * attempt)
 
     async def complete_many(self, prompts: Sequence[tuple[str, str]]) -> list[str]:
         """Run many ``(system, user)`` prompts concurrently, preserving order."""
@@ -77,17 +85,19 @@ class LitellmClient:
             self._loop = loop
         return self._semaphore
 
-    def _call(self, messages: list[JsonDict]) -> Any:
-        return _litellm().completion(
+    def _call(self, messages: list[JsonDict], *, drop_top_p: bool = False) -> Any:
+        kwargs: JsonDict = dict(
             model=self.config.model,
             api_key=self.config.api_key,
             api_base=self.config.api_base.rstrip("/"),
             messages=messages,
             temperature=self.config.temperature,
-            top_p=self.config.top_p,
             max_tokens=self.config.max_tokens,
             timeout=self.config.timeout_s,
         )
+        if not drop_top_p:
+            kwargs["top_p"] = self.config.top_p
+        return _litellm().completion(**kwargs)
 
 
 __all__ = ["LitellmClient"]

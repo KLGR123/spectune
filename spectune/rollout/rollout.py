@@ -302,9 +302,11 @@ class Rollout:
                     )
                     print(record.messages)
                 else:
+                    last_error = getattr(self.llm, "last_error", None)
+                    suffix = f"  error={last_error}" if last_error else ""
                     print(
                         f"[rollout] {counter[0]}/{total}"
-                        f"  id={s.get('sample_id', '?')}  FAILED",
+                        f"  id={s.get('sample_id', '?')}  FAILED{suffix}",
                         flush=True,
                     )
             if record is not None and ckpt_fh is not None:
