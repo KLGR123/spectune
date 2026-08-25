@@ -26,7 +26,29 @@ _TOOL_CALL_RE = re.compile(
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _SMILES_OBJECT_RE = re.compile(r"\{[^{}]*\"smiles\"\s*:\s*\[[\s\S]*?\]\s*\}")
 
-SYSTEM_PROMPT = """\
+
+SYSTEM_PROMPT_BASIC = """\
+你是一名核磁共振谱图解析助手。你可以进行多轮思考、推理和决策，并调用提供的工具收集证据、计算和验证结果等，最终给出有序的候选分子结构。
+
+## 工具调用
+需要调用工具时，使用如下格式（同一轮可输出多个）：
+<tool_call>
+{"name": "工具名", "arguments": { ... }}
+</tool_call>
+`name` 与 `arguments` 必须是合法 JSON，且符合对应工具的参数 schema。
+
+在调用代码工具时，需注意：
+- 不要加 ```py 或 ```python 等代码块标记，直接写代码即可；
+- 如果要输出结果，请使用 print() 函数打印该变量；
+- 注释应该精简。
+
+## 最终答案
+完成推理后，输出一个 JSON 对象，格式固定为：
+{"smiles": ["候选1", "候选2", "..."]}
+`smiles` 按可能性从高到低排序，元素为有效的 SMILES 字符串。
+"""
+
+SYSTEM_PROMPT_THINK = """\
 你是一名核磁共振谱图解析助手。你可以进行多轮思考、推理和决策，并调用提供的工具收集证据、计算和验证结果等，最终给出有序的候选分子结构。
 
 ## 思考
@@ -53,6 +75,66 @@ SYSTEM_PROMPT = """\
 {"smiles": ["候选1", "候选2", "..."]}
 `smiles` 按可能性从高到低排序，元素为有效的 SMILES 字符串。
 """
+
+SYSTEM_PROMPT_THINK_RDKIT = """\
+你是一名核磁共振谱图解析助手。你可以进行多轮思考、推理和决策，并调用提供的工具收集证据、计算和验证结果等，最终给出有序的候选分子结构。
+
+## 思考
+在每次调用工具或给出最终答案之前，先用 <think></think> 包裹你的思考过程：
+<think>
+（在这里思考）
+</think>
+调用工具前请做出尽可能仔细的思考，包括总结、推测、反思、质疑等；工具调用后请在新的 <think></think> 中给出尽可能多的观察、分析、总结、规划等，以便说明下一步依据。思考内容请输出中文。
+
+## 工具调用
+需要调用工具时，使用如下格式（同一轮可输出多个）：
+<tool_call>
+{"name": "工具名", "arguments": { ... }}
+</tool_call>
+`name` 与 `arguments` 必须是合法 JSON，且符合对应工具的参数 schema。
+
+在调用代码工具时，需注意：
+- 不要加 ```py 或 ```python 等代码块标记，直接写代码即可；
+- 如果要输出结果，请使用 print() 函数打印该变量；
+- 注释应该精简。
+
+## RDKit 使用要点
+用代码工具做结构推测时可参考：
+- 解析分子用 `Chem.MolFromSmiles`/`MolFromMolBlock`，失败返回 `None`，务必检查。
+- 加氢后（`Chem.AddHs`）统计每个碳/氮连接的氢数，与 ¹H NMR 积分/裂分（CH、CH₂、CH₃）对照；用 `atom.IsInRing()`/`IsInRingSize(n)` 核对谱图暗示的环状结构。
+- 先由谱图特征（NMR位移范围、MS特征丢失）推断候选官能团，再用 SMARTS（`Chem.MolFromSmarts` + `HasSubstructMatch`/`GetSubstructMatches`）筛选/排除候选分子。
+- MS 定量：`Descriptors.ExactMolWt` 算精确质量反推分子式，环+双键不饱和度（DBE）过滤不合理候选；`Descriptors.CalcMolDescriptors` 一次性得约208个描述符（TPSA、LogP等）辅助判断官能团范围。
+- 生成多个候选 SMILES 后，用 Morgan/拓扑指纹（`AllChem.GetMorganGenerator`+`DataStructs.TanimotoSimilarity`）去重、聚类或与已知谱-结构库做相似度检索，避免同一结构的不同写法被当成不同候选。
+- `rdFMCS.FindMCS`/`rdRascalMCES.RascalMCES` 可比较候选结构间的共性骨架，辅助判断哪个候选更合理。
+- 反应/片段化：`AllChem.ReactionFromSmarts(...).RunReactants(...)` 可依据推测的反应式由前体拼出候选产物；`rdkit.Chem.Recap`/`BRICS` 逆合成式片段化，可与 MS 碎裂丢失的中性片段（如失水、失CO）对照，辅助定位可断裂位点。
+
+## 最终答案
+完成推理后，输出一个 JSON 对象，格式固定为：
+{"smiles": ["候选1", "候选2", "..."]}
+`smiles` 按可能性从高到低排序，元素为有效的 SMILES 字符串。
+"""
+
+
+SYSTEM_PROMPT = SYSTEM_PROMPT_THINK_RDKIT
+
+SYSTEM_PROMPT_REGISTRY: dict[str, str] = {
+    "basic": SYSTEM_PROMPT_BASIC,
+    "think": SYSTEM_PROMPT_THINK,
+    "think_rdkit": SYSTEM_PROMPT_THINK_RDKIT,
+}
+
+DEFAULT_PROMPT_VERSION = "think_rdkit"
+
+
+def get_system_prompt(version: str | None = None) -> str:
+    """Return the system prompt for *version* (default: ``DEFAULT_PROMPT_VERSION``)."""
+    key = version or DEFAULT_PROMPT_VERSION
+    try:
+        return SYSTEM_PROMPT_REGISTRY[key]
+    except KeyError:
+        valid = ", ".join(SYSTEM_PROMPT_REGISTRY)
+        raise ValueError(f"unknown prompt version {key!r}; valid: {valid}") from None
+
 
 ANSWER_EXAMPLE = {"smiles": ["CCO", "COC"]}
 
@@ -260,8 +342,13 @@ def _smiles_from_value(value: Any) -> list[str] | None:
 
 __all__ = [
     "ANSWER_EXAMPLE",
+    "DEFAULT_PROMPT_VERSION",
     "FORMAT_SPEC_VERSION",
     "SYSTEM_PROMPT",
+    "SYSTEM_PROMPT_BASIC",
+    "SYSTEM_PROMPT_REGISTRY",
+    "SYSTEM_PROMPT_THINK",
+    "SYSTEM_PROMPT_THINK_RDKIT",
     "TOOL_CALL_END",
     "TOOL_CALL_START",
     "TOOL_RESPONSE_END",
@@ -271,6 +358,7 @@ __all__ = [
     "final_answer_region",
     "format_final_answer",
     "format_tools_block",
+    "get_system_prompt",
     "messages_from_decoded_hermes",
     "strip_tool_calls",
 ]

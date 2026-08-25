@@ -8,7 +8,7 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template_string
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PARQUET = ROOT / "outputs" / "datasets" / "verl" / "train_sft.parquet"
+DEFAULT_PARQUET = ROOT / "outputs" / "datasets" / "verl" / "sft.parquet"
 
 app = Flask(__name__)
 PARQUET_PATH: Path = DEFAULT_PARQUET

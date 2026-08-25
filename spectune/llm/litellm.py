@@ -47,8 +47,17 @@ class LitellmClient:
 
     async def complete_messages(self, messages: list[JsonDict]) -> str:
         """Return the assistant message for a full message list, or ``""`` on failure."""
+        content, _ = await self.complete_messages_with_reasoning(messages)
+        return content
+
+    async def complete_messages_with_reasoning(self, messages: list[JsonDict]) -> tuple[str, str]:
+        """Return ``(content, reasoning_content)``, or ``("", "")`` on failure.
+
+        ``reasoning_content`` is populated when the model exposes its chain-of-thought
+        (e.g. ``aliyun/kimi-k2.5`` via the ``reasoning_content`` response field).
+        """
         if not self.available:
-            return ""
+            return "", ""
         async with self._limiter():
             self.stats["requests"] += 1
             drop_top_p = False
@@ -56,7 +65,13 @@ class LitellmClient:
             while True:
                 try:
                     response = await asyncio.to_thread(self._call, messages, drop_top_p=drop_top_p)
-                    return str(response.choices[0].message.content or "").strip()
+                    msg = response.choices[0].message
+                    content = str(msg.content or "").strip()
+                    # reasoning_content is present on models like aliyun/kimi-k2.5;
+                    # also check model_extra for gateways that park it there.
+                    me = getattr(msg, "model_extra", None) or {}
+                    rc = getattr(msg, "reasoning_content", None) or me.get("reasoning_content") or ""
+                    return content, str(rc).strip()
                 except Exception as exc:
                     self.last_error = f"{type(exc).__name__}: {exc}"
                     # Some Bedrock-hosted models (e.g. Claude) reject requests that
@@ -67,7 +82,7 @@ class LitellmClient:
                         continue
                     if attempt >= self.config.max_retries:
                         self.stats["failures"] += 1
-                        return ""
+                        return "", ""
                     attempt += 1
                     self.stats["retries"] += 1
                     await asyncio.sleep(1.5 * attempt)

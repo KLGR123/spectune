@@ -55,8 +55,9 @@ class TestRunAgentLoop:
         rollout = _rollout(max_assistant_turns=5)
         rollout.llm.complete_messages = AsyncMock(return_value='{"smiles": ["CCO"]}')
         messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+        reasoning_content: list = []
 
-        response = asyncio.run(rollout._run_agent_loop(messages, sample_id="s1"))
+        response = asyncio.run(rollout._run_agent_loop(messages, reasoning_content, sample_id="s1"))
 
         assert response == '{"smiles": ["CCO"]}'
         assert messages[-1] == {"role": "assistant", "content": '{"smiles": ["CCO"]}'}
@@ -74,8 +75,9 @@ class TestRunAgentLoop:
             return_value=ToolResult(completion="success", status="ok", data={"candidates": []})
         )
         messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+        reasoning_content: list = []
 
-        response = asyncio.run(rollout._run_agent_loop(messages, sample_id="s2"))
+        response = asyncio.run(rollout._run_agent_loop(messages, reasoning_content, sample_id="s2"))
 
         assert response == '{"smiles": ["CCO"]}'
         assert rollout.llm.complete_messages.await_count == 2
@@ -90,8 +92,9 @@ class TestRunAgentLoop:
         )
         rollout.tool_manager.invoke = AsyncMock(return_value=ToolResult(completion="success", status="ok", data={}))
         messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+        reasoning_content: list = []
 
-        response = asyncio.run(rollout._run_agent_loop(messages, sample_id="s3"))
+        response = asyncio.run(rollout._run_agent_loop(messages, reasoning_content, sample_id="s3"))
 
         assert rollout.llm.complete_messages.await_count == 2
         assert response == '<tool_call>\n{"name": "nmr_generate", "arguments": {}}\n</tool_call>'
@@ -100,8 +103,9 @@ class TestRunAgentLoop:
         rollout = _rollout()
         rollout.llm.complete_messages = AsyncMock(return_value="")
         messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+        reasoning_content: list = []
 
-        response = asyncio.run(rollout._run_agent_loop(messages, sample_id="s4"))
+        response = asyncio.run(rollout._run_agent_loop(messages, reasoning_content, sample_id="s4"))
 
         assert response is None
 
@@ -109,7 +113,7 @@ class TestRunAgentLoop:
 class TestRunOne:
     def test_accepts_first_response_when_no_sampler(self):
         rollout = _rollout()
-        rollout._sample_response = AsyncMock(return_value=(format_final_answer(["CCO"]), []))
+        rollout._sample_response = AsyncMock(return_value=(format_final_answer(["CCO"]), [], []))
         sample = {"sample_id": "s1", "gt_smiles": "CCO"}
 
         record = asyncio.run(rollout._run_one(sample, sampler=None, evaluator=RewardEvaluator()))
@@ -122,8 +126,8 @@ class TestRunOne:
         rollout = _rollout(max_rounds=3)
         rollout._sample_response = AsyncMock(
             side_effect=[
-                (format_final_answer(["CCN"]), ["m1"]),
-                (format_final_answer(["CCO"]), ["m2"]),
+                (format_final_answer(["CCN"]), ["m1"], []),
+                (format_final_answer(["CCO"]), ["m2"], []),
             ]
         )
         sampler = GtRejectionSampler()
@@ -139,8 +143,8 @@ class TestRunOne:
         rollout = _rollout(max_rounds=2)
         rollout._sample_response = AsyncMock(
             side_effect=[
-                (format_final_answer(["CCN"]), ["m1"]),
-                (format_final_answer(["CCN"]), ["m2"]),
+                (format_final_answer(["CCN"]), ["m1"], []),
+                (format_final_answer(["CCN"]), ["m2"], []),
             ]
         )
         sampler = GtRejectionSampler()

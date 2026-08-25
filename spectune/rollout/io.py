@@ -139,6 +139,7 @@ def load_checkpoint(ckpt_path: Path) -> tuple[list, set[str]]:
                     reward_score=d["reward_score"],
                     reward_details=d["reward_details"],
                     n_rounds=d["n_rounds"],
+                    reasoning_content=d.get("reasoning_content"),
                 )
                 records.append(record)
                 ids.add(record.sample_id)

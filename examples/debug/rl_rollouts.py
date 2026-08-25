@@ -6,7 +6,7 @@ from pathlib import Path
 from flask import Flask, abort, jsonify, render_template_string, request
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_TRAJ_DIR = ROOT / "outputs" / "trajectories" / "spectune"
+DEFAULT_TRAJ_DIR = ROOT / "outputs" / "trajectories" / "rl"
 
 app = Flask(__name__)
 TRAJ_DIR: Path = DEFAULT_TRAJ_DIR

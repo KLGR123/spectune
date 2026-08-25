@@ -49,7 +49,6 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.clip_ratio_high=0.28 \
   actor_rollout_ref.actor.loss_agg_mode=token-mean \
   actor_rollout_ref.actor.entropy_coeff=0.001 \
-  actor_rollout_ref.actor.use_dynamic_bsz=True \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.rollout.name=vllm \
   actor_rollout_ref.rollout.mode=async \
@@ -83,6 +82,7 @@ python3 -m verl.trainer.main_ppo \
   trainer.logger='["console","tensorboard"]' \
   trainer.rollout_data_dir="${SPECTUNE_ROOT}/outputs/trajectories/${PROJECT_NAME}/${EXPERIMENT_NAME}" \
   actor_rollout_ref.model.use_liger=True \
+  actor_rollout_ref.actor.use_dynamic_bsz=True \
   actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=24576 \
   actor_rollout_ref.actor.ppo_max_token_len_per_gpu=24576 \
   actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=24576 \

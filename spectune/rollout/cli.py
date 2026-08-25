@@ -16,6 +16,7 @@ import dataclasses
 import os
 import sys
 
+from spectune.format.v1 import DEFAULT_PROMPT_VERSION, SYSTEM_PROMPT_REGISTRY, get_system_prompt
 from spectune.llm import BACKENDS, LlmConfig, create_llm_client, vllm_server
 from spectune.tools.config import NMR_GENERATE_MAX_TOPK
 
@@ -167,6 +168,16 @@ def add_llm_args(p: argparse.ArgumentParser) -> None:
         ),
     )
 
+    p.add_argument(
+        "--prompt",
+        choices=list(SYSTEM_PROMPT_REGISTRY),
+        default=DEFAULT_PROMPT_VERSION,
+        metavar="VERSION",
+        help=(
+            f"System prompt version (default: {DEFAULT_PROMPT_VERSION}). "
+            f"Choices: {', '.join(SYSTEM_PROMPT_REGISTRY)}."
+        ),
+    )
     p.add_argument("--no-progress", action="store_true", help="Suppress progress bar.")
 
 
@@ -177,6 +188,7 @@ def build_rollout_config(args: argparse.Namespace) -> RolloutConfig:
         temperature=args.temperature,
         top_p=args.top_p,
         max_tokens=args.max_tokens,
+        system_prompt=get_system_prompt(args.prompt),
         nmr_gen_topk=args.nmr_gen_topk,
         tool_names=tuple(args.tools) if args.tools else (),
         max_assistant_turns=args.max_assistant_turns,

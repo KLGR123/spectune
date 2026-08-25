@@ -49,9 +49,12 @@ class RolloutRecord:
     reward_score: float
     reward_details: JsonDict
     n_rounds: int
+    # Parallel to ``messages``; non-None only for assistant turns that returned
+    # chain-of-thought text.  Omitted from to_dict() when all entries are empty.
+    reasoning_content: list[str | None] | None = None
 
     def to_dict(self) -> JsonDict:
-        return {
+        d: JsonDict = {
             "sample_id": self.sample_id,
             "gt_smiles": self.gt_smiles,
             "messages": self.messages,
@@ -59,6 +62,9 @@ class RolloutRecord:
             "reward_details": self.reward_details,
             "n_rounds": self.n_rounds,
         }
+        if self.reasoning_content and any(self.reasoning_content):
+            d["reasoning_content"] = self.reasoning_content
+        return d
 
 
 def compute_hit_at_k_metrics(
@@ -162,18 +168,26 @@ class Rollout:
             system_prompt += "\n" + skill_text
         self.system_prompt = system_prompt
 
-    async def _run_agent_loop(self, messages: list[JsonDict], sample_id: str = "") -> str | None:
+    async def _run_agent_loop(
+        self, messages: list[JsonDict], reasoning_content: list[str | None], sample_id: str = ""
+    ) -> str | None:
         """Generate → execute tool calls → feed results back, until answer or cap.
 
-        Mutates ``messages`` in place.  Returns the final assistant response,
-        or ``None`` if an LLM call fails outright.
+        Mutates ``messages`` and ``reasoning_content`` in place (both stay
+        parallel: one entry per appended message).  Returns the final assistant
+        response, or ``None`` if an LLM call fails outright.
         """
         final_response = ""
+        complete_fn = getattr(self.llm, "complete_messages_with_reasoning", None)
         for turn_idx in range(self.config.max_assistant_turns):
-            response = await self.llm.complete_messages(messages)
+            if complete_fn is not None:
+                response, rc = await complete_fn(messages)
+            else:
+                response, rc = await self.llm.complete_messages(messages), ""
             if not response:
                 return None
             messages.append({"role": "assistant", "content": response})
+            reasoning_content.append(rc or None)
             final_response = response
             tool_calls = extract_tool_calls(response)
             if not tool_calls:
@@ -189,12 +203,17 @@ class Rollout:
             for result in results:
                 payload = json.dumps(compact_tool_payload(result), ensure_ascii=False)
                 messages.append({"role": "user", "content": f"{TOOL_RESPONSE_START}\n{payload}\n{TOOL_RESPONSE_END}"})
+                reasoning_content.append(None)
         return final_response
 
-    async def _sample_response(self, sample: JsonDict) -> tuple[str, list[JsonDict]] | None:
+    async def _sample_response(self, sample: JsonDict) -> tuple[str, list[JsonDict], list[str | None]] | None:
         """Draw one agent-loop trajectory for ``sample``.
 
-        Returns ``(final_response, full_messages)`` or ``None`` on LLM failure.
+        Returns ``(final_response, full_messages, reasoning_content)`` or ``None``
+        on LLM failure.  ``reasoning_content`` is parallel to ``full_messages``
+        (one entry per message; non-None only for assistant turns that returned
+        chain-of-thought text).
+
         Handles n user turns: each user turn triggers a full agent loop, and the
         accumulated conversation is carried into the next turn.
         """
@@ -207,15 +226,17 @@ class Rollout:
         messages: list[JsonDict] = [
             {"role": "system", "content": self.system_prompt},
         ]
+        reasoning_content: list[str | None] = [None]  # system message has no reasoning
         final_response = ""
         for user_turn in user_turns:
             messages.append({"role": "user", "content": str(user_turn.get("content", ""))})
-            response = await self._run_agent_loop(messages, sample_id=sample_id)
+            reasoning_content.append(None)
+            response = await self._run_agent_loop(messages, reasoning_content, sample_id=sample_id)
             if response is None:
                 return None
             final_response = response
 
-        return final_response, messages
+        return final_response, messages, reasoning_content
 
     async def _run_one(
         self,
@@ -223,7 +244,12 @@ class Rollout:
         sampler: BaseSampler | None,
         evaluator: Any,
     ) -> RolloutRecord | None:
-        def _make_record(response: str, full_messages: list[JsonDict], n_rounds: int) -> RolloutRecord:
+        def _make_record(
+            response: str,
+            full_messages: list[JsonDict],
+            reasoning_content: list[str | None],
+            n_rounds: int,
+        ) -> RolloutRecord:
             reward = evaluator.evaluate(response, sample.get("gt_smiles", ""))
             return RolloutRecord(
                 sample_id=str(sample.get("sample_id", "")),
@@ -232,6 +258,7 @@ class Rollout:
                 reward_score=reward.score,
                 reward_details=dict(reward.details),
                 n_rounds=n_rounds,
+                reasoning_content=reasoning_content,
             )
 
         # No rejection sampling: sample once and accept unconditionally.
@@ -239,20 +266,20 @@ class Rollout:
             result = await self._sample_response(sample)
             if result is None:
                 return None
-            response, full_messages = result
-            return _make_record(response, full_messages, 1)
+            response, full_messages, reasoning_content = result
+            return _make_record(response, full_messages, reasoning_content, 1)
 
         # Rejection sampling: try up to max_rounds; fall back to the last
         # successful response if no round passes the sampler.
-        last: tuple[str, list[JsonDict], int] | None = None
+        last: tuple[str, list[JsonDict], list[str | None], int] | None = None
         for round_idx in range(1, self.config.max_rounds + 1):
             result = await self._sample_response(sample)
             if result is None:
                 continue
-            response, full_messages = result
-            last = (response, full_messages, round_idx)
+            response, full_messages, reasoning_content = result
+            last = (response, full_messages, reasoning_content, round_idx)
             if sampler.accept(response, sample):
-                return _make_record(response, full_messages, round_idx)
+                return _make_record(response, full_messages, reasoning_content, round_idx)
 
         if last is None:
             return None  # every LLM call failed

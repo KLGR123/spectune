@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from spectune.artifacts.compile import ArtifactCompileConfig, compile_jsonl_file, write_interaction_config
-from spectune.format.v1 import FORMAT_SPEC_VERSION
+from spectune.format.v1 import DEFAULT_PROMPT_VERSION, FORMAT_SPEC_VERSION, SYSTEM_PROMPT_REGISTRY, get_system_prompt
 from spectune.tools.catalog import DEFAULT_RL_TOOL_NAMES
 
 
@@ -73,6 +73,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Embed full OpenAI schemas in every row (default: store tool_names only)",
     )
     compile_parser.add_argument(
+        "--prompt",
+        choices=list(SYSTEM_PROMPT_REGISTRY),
+        default=DEFAULT_PROMPT_VERSION,
+        metavar="VERSION",
+        help=(
+            f"System prompt version baked into the compiled rows (default: "
+            f"{DEFAULT_PROMPT_VERSION}). Choices: {', '.join(SYSTEM_PROMPT_REGISTRY)}."
+        ),
+    )
+    compile_parser.add_argument(
         "--manifest",
         default=None,
         help="Optional path to write a small JSON compile manifest",
@@ -108,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config = ArtifactCompileConfig(
         data_source=args.data_source[0],
+        system_prompt=get_system_prompt(args.prompt),
         tool_names=tool_names,
         reward_config=reward_config,
         include_tool_schemas=bool(args.include_tool_schemas),

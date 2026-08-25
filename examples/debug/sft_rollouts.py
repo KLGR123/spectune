@@ -7,10 +7,10 @@ import pandas as pd
 from flask import Flask, jsonify, render_template_string, request
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PARQUET_DIR = ROOT / "outputs" / "datasets" / "sft"
+DEFAULT_PARQUET = ROOT / "outputs" / "datasets" / "verl" / "sft.parquet"
 
 app = Flask(__name__)
-PARQUET_DIR: Path = DEFAULT_PARQUET_DIR
+PARQUET_FILE: Path = DEFAULT_PARQUET
 _df_cache: dict[str, list[dict]] = {}
 
 
@@ -80,7 +80,7 @@ def load_df(source: str) -> list[dict]:
     if source in _df_cache:
         return _df_cache[source]
 
-    path = PARQUET_DIR / f"{source}.parquet"
+    path = PARQUET_FILE
     df = pd.read_parquet(path)
     records = []
     for idx, row in df.iterrows():
@@ -233,7 +233,7 @@ HTML = r"""<!doctype html>
 <body>
 <header>
   <h1>SFT Teacher Rollouts Viewer</h1>
-  <span class="sub">{{ parquet_dir }}</span>
+  <span class="sub">{{ parquet_file }}</span>
 </header>
 <div class="layout">
   <div id="sidebar">
@@ -400,15 +400,14 @@ function toggleSection(titleEl) {
 
 @app.route("/")
 def index():
-    return render_template_string(HTML, parquet_dir=str(PARQUET_DIR))
+    return render_template_string(HTML, parquet_file=str(PARQUET_FILE))
 
 
 @app.route("/api/sources")
 def api_sources():
-    if not PARQUET_DIR.exists():
+    if not PARQUET_FILE.exists():
         return jsonify([])
-    sources = sorted(p.stem for p in PARQUET_DIR.glob("*.parquet"))
-    return jsonify(sources)
+    return jsonify([PARQUET_FILE.stem])
 
 
 @app.route("/api/count")
@@ -450,10 +449,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=7862)
     parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--parquet-dir", default=str(DEFAULT_PARQUET_DIR))
+    parser.add_argument("--parquet", default=str(DEFAULT_PARQUET))
     args = parser.parse_args()
 
-    PARQUET_DIR = Path(args.parquet_dir).resolve()
-    print(f"Serving rollout data from: {PARQUET_DIR}")
+    PARQUET_FILE = Path(args.parquet).resolve()
+    print(f"Serving rollout data from: {PARQUET_FILE}")
     print(f"Open http://localhost:{args.port}")
     app.run(host=args.host, port=args.port, debug=False)

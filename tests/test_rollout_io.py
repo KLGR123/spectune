@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from spectune.format.v1 import DEFAULT_PROMPT_VERSION
 from spectune.rollout.cli import build_rollout_config
 from spectune.rollout.io import checkpoint_path, load_checkpoint, load_jsonl, load_samples
 from spectune.rollout.rollout import RolloutRecord
@@ -117,6 +118,7 @@ def test_build_rollout_config_reads_shared_cli_args():
         max_assistant_turns=8,
         max_concurrency=4,
         no_progress=True,
+        prompt=DEFAULT_PROMPT_VERSION,
         skills=None,
     )
 

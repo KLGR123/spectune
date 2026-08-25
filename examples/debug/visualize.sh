@@ -8,9 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SPECTUNE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-TRAJ_DIR="${TRAJ_DIR:-$SPECTUNE_ROOT/outputs/trajectories/spectune}"
-ROLLOUT_PARQUET_DIR="${ROLLOUT_PARQUET_DIR:-$SPECTUNE_ROOT/outputs/datasets/sft}"
-SFT_PARQUET="${SFT_PARQUET:-$SPECTUNE_ROOT/outputs/datasets/verl/train_sft.parquet}"
+TRAJ_DIR="${TRAJ_DIR:-$SPECTUNE_ROOT/outputs/trajectories/rl}"
+SFT_PARQUET="${SFT_PARQUET:-$SPECTUNE_ROOT/outputs/datasets/verl/sft.parquet}"
 PORT_TRAJ="${PORT_TRAJ:-7860}"
 PORT_STATS="${PORT_STATS:-7861}"
 PORT_ROLLOUT="${PORT_ROLLOUT:-7862}"
@@ -36,7 +35,7 @@ PID_TRAJ=$!
 python3 "$SCRIPT_DIR/rl_tool_stats.py" --traj-dir "$TRAJ_DIR" --port "$PORT_STATS" &
 PID_STATS=$!
 
-python3 "$SCRIPT_DIR/sft_rollouts.py" --parquet-dir "$ROLLOUT_PARQUET_DIR" --port "$PORT_ROLLOUT" &
+python3 "$SCRIPT_DIR/sft_rollouts.py" --parquet "$SFT_PARQUET" --port "$PORT_ROLLOUT" &
 PID_ROLLOUT=$!
 
 python3 "$SCRIPT_DIR/sft_stats.py" --parquet "$SFT_PARQUET" --port "$PORT_STATS_SFT" &

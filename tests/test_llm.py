@@ -88,7 +88,7 @@ class TestLitellmClientRetries:
         client = _litellm_client(max_retries=2)
         calls = {"n": 0}
 
-        def flaky(_messages):
+        def flaky(_messages, **_kwargs):
             calls["n"] += 1
             if calls["n"] < 3:
                 raise RuntimeError("API error")
@@ -132,7 +132,7 @@ class TestLitellmClientConcurrency:
         active = {"n": 0, "max": 0}
         lock = threading.Lock()
 
-        def slow_call(_messages):
+        def slow_call(_messages, **_kwargs):
             with lock:
                 active["n"] += 1
                 active["max"] = max(active["max"], active["n"])
