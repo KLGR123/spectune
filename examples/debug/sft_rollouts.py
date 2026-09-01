@@ -258,7 +258,7 @@ HTML = r"""<!doctype html>
 let currentSource = '';
 let totalCount = 0;
 
-fetch('/api/sources').then(r => r.json()).then(sources => {
+fetch('api/sources').then(r => r.json()).then(sources => {
   const list = document.getElementById('src-list');
   if (!sources.length) {
     list.innerHTML = '<div style="padding:16px;color:var(--gray);font-size:13px">No parquet files found</div>';
@@ -267,7 +267,6 @@ fetch('/api/sources').then(r => r.json()).then(sources => {
   list.innerHTML = sources.map(s =>
     `<div class="exp-item" onclick="loadSource('${escAttr(s)}', this)">${escHtml(s)}</div>`
   ).join('');
-  list.querySelector('.exp-item').click();
 });
 
 function escHtml(s) {
@@ -284,7 +283,7 @@ function loadSource(source, el) {
   totalCount = 0;
   document.getElementById('traj-counter').textContent = '';
   document.getElementById('viewer').innerHTML = '<p style="color:var(--gray);padding:24px">Loading…</p>';
-  fetch(`/api/count?source=${encodeURIComponent(source)}`)
+  fetch(`api/count?source=${encodeURIComponent(source)}`)
     .then(r => r.json())
     .then(d => { totalCount = d.count; rollOne(); });
 }
@@ -295,7 +294,7 @@ function rollOne() {
   const btn = document.getElementById('dice-btn');
   btn.disabled = true;
   btn.textContent = '…';
-  fetch(`/api/random?source=${encodeURIComponent(currentSource)}&min_score=${minScore}`)
+  fetch(`api/random?source=${encodeURIComponent(currentSource)}&min_score=${minScore}`)
     .then(r => r.json())
     .then(t => {
       btn.disabled = false;
@@ -314,7 +313,7 @@ function goToIndex() {
   if (!currentSource) return;
   const val = parseInt(document.getElementById('goto-input').value);
   if (isNaN(val) || val < 1) return;
-  fetch(`/api/get?source=${encodeURIComponent(currentSource)}&idx=${val}`)
+  fetch(`api/get?source=${encodeURIComponent(currentSource)}&idx=${val}`)
     .then(r => r.json())
     .then(t => {
       if (!t) {

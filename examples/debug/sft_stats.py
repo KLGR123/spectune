@@ -36,6 +36,14 @@ def _extract_tool_sequence(messages: list) -> list[str]:
     return seq
 
 
+def _count_assistant_turns(messages: list) -> int:
+    return sum(
+        1
+        for msg in messages
+        if (msg.get("role", "") if isinstance(msg, dict) else getattr(msg, "role", "")) == "assistant"
+    )
+
+
 def _build_trie(sequences: list[list[str]]) -> dict:
     root: dict = {"name": "start", "count": len(sequences), "end_count": 0, "children": {}}
     for seq in sequences:
@@ -91,7 +99,8 @@ def load_stats() -> dict:
 
     df = pd.read_parquet(PARQUET_PATH)
     scores: list[float] = []
-    lengths: list[int] = []
+    message_lengths: list[int] = []
+    trajectory_lengths: list[int] = []
     tool_counts: list[int] = []
     seqs: list[list[str]] = []
 
@@ -102,7 +111,8 @@ def load_stats() -> dict:
             messages = []
         else:
             messages = list(messages)
-        lengths.append(len(messages))
+        message_lengths.append(len(messages))
+        trajectory_lengths.append(_count_assistant_turns(messages))
         seq = _extract_tool_sequence(messages)
         tool_counts.append(len(seq))
         seqs.append(seq)
@@ -111,10 +121,10 @@ def load_stats() -> dict:
     _cache = {
         "total": n,
         "avg_score": sum(scores) / n if n else 0.0,
-        "avg_messages": sum(lengths) / n if n else 0.0,
+        "avg_messages": sum(message_lengths) / n if n else 0.0,
         "avg_tool_calls": sum(tool_counts) / n if n else 0.0,
         "score_hist": _make_score_hist(scores),
-        "length_hist": _make_len_hist(lengths),
+        "length_hist": _make_len_hist(trajectory_lengths),
         "tool_tree": _trie_to_list(_build_trie(seqs)),
     }
     return _cache
@@ -177,12 +187,15 @@ HTML = r"""<!doctype html>
   <span class="sub">{{ parquet_path }}</span>
 </header>
 
-<div id="loading">Loading…</div>
+<div id="loading" style="display:none">Loading…</div>
+<div id="load-btn-wrap" style="padding:48px 24px">
+  <button onclick="startLoad()" style="font-size:14px;padding:8px 20px;border-radius:6px;border:1px solid var(--border);background:var(--blue);color:#fff;cursor:pointer;font-weight:600">Load Statistics</button>
+</div>
 <div id="content" style="display:none">
   <div class="stat-bar" id="stat-bar"></div>
   <div class="charts">
     <div class="chart-card">
-      <h3>Trajectory Length (messages)</h3>
+      <h3>Trajectory Length Distribution</h3>
       <canvas id="c-len"></canvas>
     </div>
     <div class="chart-card">
@@ -204,7 +217,7 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function mkChart(id, labels, counts, color) {
+function mkChart(id, labels, counts, color, xTitle = '', yTitle = '') {
   new Chart(document.getElementById(id), {
     type: 'bar',
     data: {
@@ -221,8 +234,15 @@ function mkChart(id, labels, counts, color) {
       responsive: true,
       plugins: { legend: { display: false } },
       scales: {
-        x: { ticks: { maxTicksLimit: 14, font: { size: 11 } } },
-        y: { beginAtZero: true, ticks: { font: { size: 11 } } },
+        x: {
+          title: { display: Boolean(xTitle), text: xTitle },
+          ticks: { maxTicksLimit: 14, font: { size: 11 } },
+        },
+        y: {
+          beginAtZero: true,
+          title: { display: Boolean(yTitle), text: yTitle },
+          ticks: { precision: 0, font: { size: 11 } },
+        },
       },
     },
   });
@@ -270,7 +290,14 @@ function toggleNode(el, id) {
   el.textContent = hidden ? '▾' : '▸';
 }
 
-fetch('/api/stats').then(r => r.json()).then(d => {
+function startLoad() {
+  document.getElementById('load-btn-wrap').style.display = 'none';
+  document.getElementById('loading').style.display = 'block';
+  doLoad();
+}
+
+function doLoad() {
+fetch('api/stats').then(r => r.json()).then(d => {
   if (d.error) {
     document.getElementById('loading').textContent = 'Error: ' + d.error;
     return;
@@ -290,11 +317,19 @@ fetch('/api/stats').then(r => r.json()).then(d => {
     </div>`
   ).join('');
 
-  mkChart('c-len',   d.length_hist.labels, d.length_hist.counts, '#2563eb');
+  mkChart(
+    'c-len',
+    d.length_hist.labels,
+    d.length_hist.counts,
+    '#2563eb',
+    'Trajectory Length',
+    'Frequency',
+  );
   mkChart('c-score', d.score_hist.labels,  d.score_hist.counts,  '#16a34a');
 
   document.getElementById('tree-root').innerHTML = renderTree(d.tool_tree, 0);
 });
+}
 </script>
 </body>
 </html>

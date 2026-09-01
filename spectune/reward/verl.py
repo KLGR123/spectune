@@ -102,6 +102,7 @@ def compute_score(
         else:
             print(f"[DEBUG] solution_str = {solution_str[:500]!r}")
         breakpoint()
+    
     config_values: dict[str, Any] = {}
     nested_config = extra_info.get("reward_config")
     if isinstance(nested_config, Mapping):

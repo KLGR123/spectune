@@ -1,6 +1,7 @@
 import argparse
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template_string, request
@@ -156,6 +157,9 @@ HTML = r"""<!doctype html>
   #controls label { font-size: 13px; color: var(--gray); }
   #controls select, #controls input { font-size: 13px; border: 1px solid var(--border);
                                       border-radius: 6px; padding: 4px 8px; background: #fff; }
+  #controls button { font-size: 13px; border: 1px solid var(--border); border-radius: 6px;
+                     padding: 4px 10px; background: #fff; cursor: pointer; }
+  #controls button:disabled { color: #8c959f; cursor: not-allowed; }
   #traj-counter { font-size: 13px; color: var(--gray); margin-left: auto; }
   #viewer { flex: 1; overflow-y: auto; padding: 16px; }
 
@@ -234,13 +238,20 @@ HTML = r"""<!doctype html>
     <div id="controls">
       <label>Filter score ≥</label>
       <input type="number" id="min-score" value="-99" step="0.05" style="width:70px"
-             oninput="renderVisible()"/>
+             onchange="applyFilters()"/>
       <label>Sort by</label>
-      <select id="sort-by" onchange="renderVisible()">
+      <select id="sort-by" onchange="applyFilters()">
         <option value="index">Index</option>
         <option value="score_desc">Score ↓</option>
         <option value="score_asc">Score ↑</option>
       </select>
+      <button id="prev-page" onclick="changePage(-1)">← Prev</button>
+      <label>Page
+        <input type="number" id="page-number" min="1" value="1" style="width:58px"
+               onkeydown="if(event.key==='Enter') goToPage()"/>
+      </label>
+      <span id="page-total">/ 1</span>
+      <button id="next-page" onclick="changePage(1)">Next →</button>
       <span id="traj-counter"></span>
     </div>
     <div id="viewer"><p style="color:var(--gray);padding:24px">← Select a file from the sidebar</p></div>
@@ -248,33 +259,77 @@ HTML = r"""<!doctype html>
 </div>
 
 <script>
-let allTrajs = [];
+let currentRel = '';
+let currentPage = 1;
+let totalPages = 1;
+let requestSerial = 0;
 
 function loadFile(rel, el) {
   document.querySelectorAll('.file-link').forEach(a => a.classList.remove('active'));
   el.classList.add('active');
-  fetch('/api/file?rel=' + encodeURIComponent(rel))
-    .then(r => r.json())
-    .then(data => { allTrajs = data; renderVisible(); });
+  currentRel = rel;
+  loadPage(1);
 }
 
-function renderVisible() {
-  const minScore = parseFloat(document.getElementById('min-score').value) || -99;
+function applyFilters() {
+  if (currentRel) loadPage(1);
+}
+
+function changePage(delta) {
+  loadPage(currentPage + delta);
+}
+
+function goToPage() {
+  loadPage(parseInt(document.getElementById('page-number').value, 10));
+}
+
+async function loadPage(page) {
+  if (!currentRel || !Number.isFinite(page)) return;
+  page = Math.max(1, Math.min(page, totalPages));
+  const parsedMinScore = parseFloat(document.getElementById('min-score').value);
+  const minScore = Number.isFinite(parsedMinScore) ? parsedMinScore : -99;
   const sortBy   = document.getElementById('sort-by').value;
+  const serial = ++requestSerial;
+  const viewer = document.getElementById('viewer');
+  viewer.innerHTML = '<p style="color:var(--gray);padding:24px">Loading…</p>';
 
-  let trajs = allTrajs.filter(t => t.score >= minScore);
+  const params = new URLSearchParams({
+    rel: currentRel,
+    page: String(page),
+    page_size: '10',
+    min_score: String(minScore),
+    sort: sortBy,
+  });
 
-  if (sortBy === 'score_desc') trajs.sort((a, b) => b.score - a.score);
-  else if (sortBy === 'score_asc') trajs.sort((a, b) => a.score - b.score);
+  try {
+    const response = await fetch('api/file?' + params.toString());
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (serial !== requestSerial) return;
 
-  document.getElementById('traj-counter').textContent =
-    `Showing ${trajs.length} / ${allTrajs.length}`;
+    currentPage = data.page;
+    totalPages = data.pages;
+    document.getElementById('page-number').value = currentPage;
+    document.getElementById('page-number').max = totalPages;
+    document.getElementById('page-total').textContent = `/ ${totalPages}`;
+    document.getElementById('prev-page').disabled = currentPage <= 1;
+    document.getElementById('next-page').disabled = currentPage >= totalPages;
 
-  document.getElementById('viewer').innerHTML = trajs.map(renderTraj).join('');
+    const first = data.filtered_total ? (currentPage - 1) * data.page_size + 1 : 0;
+    const last = first ? first + data.items.length - 1 : 0;
+    document.getElementById('traj-counter').textContent =
+      `Showing ${first}–${last} of ${data.filtered_total} (${data.total} total)`;
+    viewer.innerHTML = data.items.length
+      ? data.items.map(renderTraj).join('')
+      : '<p style="color:var(--gray);padding:24px">No trajectories match.</p>';
+  } catch (error) {
+    if (serial !== requestSerial) return;
+    viewer.innerHTML = `<p style="color:#cf222e;padding:24px">Load failed: ${escHtml(error.message)}</p>`;
+  }
 }
 
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function scoreBadgeClass(s) {
@@ -381,13 +436,45 @@ def api_file():
     rel = request.args.get("rel", "")
     # security: prevent path traversal
     target = (TRAJ_DIR / rel).resolve()
-    if not str(target).startswith(str(TRAJ_DIR.resolve())):
+    if not target.is_relative_to(TRAJ_DIR.resolve()):
         abort(400)
     if not target.exists():
         abort(404)
 
+
+    stat = target.stat()
+    results = list(_load_file(str(target), stat.st_mtime_ns, stat.st_size))
+    min_score = request.args.get("min_score", default=-99.0, type=float)
+    sort_by = request.args.get("sort", "index")
+    page = max(request.args.get("page", default=1, type=int) or 1, 1)
+    page_size = min(max(request.args.get("page_size", default=10, type=int) or 10, 1), 50)
+
+    filtered = [item for item in results if item["score"] >= min_score]
+    if sort_by == "score_desc":
+        filtered.sort(key=lambda item: item["score"], reverse=True)
+    elif sort_by == "score_asc":
+        filtered.sort(key=lambda item: item["score"])
+
+    filtered_total = len(filtered)
+    pages = max((filtered_total + page_size - 1) // page_size, 1)
+    page = min(page, pages)
+    start = (page - 1) * page_size
+    return jsonify(
+        {
+            "items": filtered[start : start + page_size],
+            "total": len(results),
+            "filtered_total": filtered_total,
+            "page": page,
+            "page_size": page_size,
+            "pages": pages,
+        }
+    )
+
+
+@lru_cache(maxsize=8)
+def _load_file(path: str, _mtime_ns: int, _size: int) -> tuple[dict, ...]:
     results = []
-    with open(target, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8") as fh:
         for idx, line in enumerate(fh):
             line = line.strip()
             if not line:
@@ -413,7 +500,7 @@ def api_file():
                     "segments": segments,
                 }
             )
-    return jsonify(results)
+    return tuple(results)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,8 @@
 
 # bash examples/debug/visualize.sh
 # USE_NGROK=0 bash examples/debug/visualize.sh
+# SERVICES=rl PYTHON_BIN=/path/to/python bash examples/debug/visualize.sh
+# RL_STATS_MAX_FILES=0 bash examples/debug/visualize.sh  # scan every checkpoint
 
 set -euo pipefail
 
@@ -14,56 +16,121 @@ PORT_TRAJ="${PORT_TRAJ:-7860}"
 PORT_STATS="${PORT_STATS:-7861}"
 PORT_ROLLOUT="${PORT_ROLLOUT:-7862}"
 PORT_STATS_SFT="${PORT_STATS_SFT:-7863}"
+RL_STATS_MAX_FILES="${RL_STATS_MAX_FILES:-80}"
+
+# all | rl | sft | comma-separated: rl-rollouts,rl-stats,sft-rollouts,sft-stats
+SERVICES="${SERVICES:-all}"
 
 # Optional: set USE_NGROK=0 to disable ngrok tunnels
 USE_NGROK="${USE_NGROK:-1}"
 
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [[ -z "$PYTHON_BIN" ]]; then
+  for candidate in python3 "$SPECTUNE_ROOT/../envs/verl/bin/python"; do
+    if { [[ -x "$candidate" ]] || command -v "$candidate" &>/dev/null; } \
+       && "$candidate" -c "import flask, pandas, pyarrow" &>/dev/null; then
+      PYTHON_BIN="$candidate"
+      break
+    fi
+  done
+fi
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "Error: no Python environment with flask, pandas and pyarrow was found." >&2
+  echo "Set PYTHON_BIN explicitly, for example:" >&2
+  echo "  PYTHON_BIN=$SPECTUNE_ROOT/../envs/verl/bin/python bash $0" >&2
+  exit 1
+fi
+
 NGROK_CONF=""
 PID_NGROK=""
+PIDS=()
+
+service_enabled() {
+  local name="$1"
+  [[ "$SERVICES" == "all" ]] \
+    || [[ ",$SERVICES," == *",$name,"* ]] \
+    || [[ "$name" == rl-* && ",$SERVICES," == *",rl,"* ]] \
+    || [[ "$name" == sft-* && ",$SERVICES," == *",sft,"* ]]
+}
+
+start_service() {
+  "$PYTHON_BIN" "$@" &
+  PIDS+=("$!")
+}
 
 cleanup() {
   echo "Stopping servers..."
-  kill "$PID_TRAJ" "$PID_STATS" "$PID_ROLLOUT" "$PID_STATS_SFT" 2>/dev/null || true
+  if ((${#PIDS[@]})); then
+    kill "${PIDS[@]}" 2>/dev/null || true
+  fi
   [[ -n "$PID_NGROK" ]] && kill "$PID_NGROK" 2>/dev/null || true
   [[ -n "$NGROK_CONF" ]] && rm -f "$NGROK_CONF"
 }
 trap cleanup EXIT INT TERM
 
-python3 "$SCRIPT_DIR/rl_rollouts.py" --traj-dir "$TRAJ_DIR" --port "$PORT_TRAJ" &
-PID_TRAJ=$!
+if service_enabled rl-rollouts; then
+  start_service "$SCRIPT_DIR/rl_rollouts.py" --traj-dir "$TRAJ_DIR" --port "$PORT_TRAJ"
+  echo "Trajectory Viewer : http://localhost:$PORT_TRAJ"
+fi
+if service_enabled rl-stats; then
+  start_service "$SCRIPT_DIR/rl_tool_stats.py" --traj-dir "$TRAJ_DIR" --port "$PORT_STATS" \
+    --max-files "$RL_STATS_MAX_FILES"
+  echo "Tool Statistics   : http://localhost:$PORT_STATS (max files: $RL_STATS_MAX_FILES)"
+fi
+if service_enabled sft-rollouts; then
+  start_service "$SCRIPT_DIR/sft_rollouts.py" --parquet "$SFT_PARQUET" --port "$PORT_ROLLOUT"
+  echo "Rollout Viewer    : http://localhost:$PORT_ROLLOUT"
+fi
+if service_enabled sft-stats; then
+  start_service "$SCRIPT_DIR/sft_stats.py" --parquet "$SFT_PARQUET" --port "$PORT_STATS_SFT"
+  echo "SFT Stats         : http://localhost:$PORT_STATS_SFT"
+fi
 
-python3 "$SCRIPT_DIR/rl_tool_stats.py" --traj-dir "$TRAJ_DIR" --port "$PORT_STATS" &
-PID_STATS=$!
-
-python3 "$SCRIPT_DIR/sft_rollouts.py" --parquet "$SFT_PARQUET" --port "$PORT_ROLLOUT" &
-PID_ROLLOUT=$!
-
-python3 "$SCRIPT_DIR/sft_stats.py" --parquet "$SFT_PARQUET" --port "$PORT_STATS_SFT" &
-PID_STATS_SFT=$!
-
-echo "Trajectory Viewer : http://localhost:$PORT_TRAJ"
-echo "Tool Statistics   : http://localhost:$PORT_STATS"
-echo "Rollout Viewer    : http://localhost:$PORT_ROLLOUT"
-echo "SFT Stats         : http://localhost:$PORT_STATS_SFT"
+if ((${#PIDS[@]} == 0)); then
+  echo "Error: SERVICES='$SERVICES' did not select any service." >&2
+  exit 1
+fi
 
 if [[ "$USE_NGROK" == "1" ]] && command -v ngrok &>/dev/null; then
   NGROK_CONF=$(mktemp /tmp/ngrok-spectune-XXXXXX.yml)
   cat > "$NGROK_CONF" <<NGROK_EOF
 version: "3"
 tunnels:
+NGROK_EOF
+  TUNNEL_COUNT=0
+  if service_enabled rl-rollouts; then
+    cat >> "$NGROK_CONF" <<NGROK_EOF
   traj-viewer:
     proto: http
     addr: $PORT_TRAJ
+NGROK_EOF
+    ((TUNNEL_COUNT+=1))
+  fi
+  if service_enabled rl-stats; then
+    cat >> "$NGROK_CONF" <<NGROK_EOF
   tool-stats:
     proto: http
     addr: $PORT_STATS
+NGROK_EOF
+    ((TUNNEL_COUNT+=1))
+  fi
+  if service_enabled sft-rollouts; then
+    cat >> "$NGROK_CONF" <<NGROK_EOF
   rollout-viewer:
     proto: http
     addr: $PORT_ROLLOUT
+NGROK_EOF
+    ((TUNNEL_COUNT+=1))
+  fi
+  if service_enabled sft-stats; then
+    cat >> "$NGROK_CONF" <<NGROK_EOF
   sft-stats:
     proto: http
     addr: $PORT_STATS_SFT
 NGROK_EOF
+    ((TUNNEL_COUNT+=1))
+  fi
 
   ngrok start --all \
     --config="$HOME/.config/ngrok/ngrok.yml" \
@@ -84,7 +151,7 @@ try:
 except Exception:
     print(0)
 " 2>/dev/null || echo 0)
-    if [[ "$COUNT" -ge 4 ]]; then
+    if [[ "$COUNT" -ge "$TUNNEL_COUNT" ]]; then
       break
     fi
   done
@@ -112,4 +179,4 @@ except Exception as e:
   echo ""
 fi
 
-wait
+wait -n "${PIDS[@]}"

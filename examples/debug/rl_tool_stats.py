@@ -10,6 +10,8 @@ DEFAULT_TRAJ_DIR = ROOT / "outputs" / "trajectories" / "rl"
 
 app = Flask(__name__)
 TRAJ_DIR: Path = DEFAULT_TRAJ_DIR
+MAX_FILES = 80
+_FILE_STATS_CACHE: dict[str, tuple[int, int, dict]] = {}
 
 
 def _parse_tool_segments(raw: str) -> list[tuple[str, str]]:
@@ -96,6 +98,7 @@ HTML = r"""<!doctype html>
   .controls label { font-size:13px; color:var(--gray);
                     display:flex; align-items:center; gap:8px; }
   .controls input[type=range] { width:160px; cursor:pointer; }
+  #stats-meta { margin-left:auto; font-size:12px; color:var(--gray); }
   #empty-hint { padding:48px; color:var(--gray); font-size:14px; }
   .charts { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:16px; }
   .chart-card { background:var(--panel); border:1px solid var(--border);
@@ -121,6 +124,7 @@ HTML = r"""<!doctype html>
                oninput="document.getElementById('sv').textContent=this.value; redraw()"/>
         <span id="sv">1</span>
       </label>
+      <span id="stats-meta"></span>
     </div>
     <div id="empty-hint">← Select an experiment from the sidebar</div>
     <div class="charts" id="charts-grid" style="display:none">
@@ -179,17 +183,25 @@ function mkChart(id, datasets, labels, yLabel) {
 let charts = [];
 let rawData = null;
 
-fetch('/api/tree').then(r => r.json()).then(groups => {
-  const list = document.getElementById('exp-list');
-  if (!groups.length) {
-    list.innerHTML = '<div style="padding:16px;color:var(--gray);font-size:13px">No experiments found</div>';
-    return;
-  }
-  list.innerHTML = groups.map(g =>
-    `<div class="exp-item" onclick="loadGroup('${escAttr(g)}', this)">${escHtml(g)}</div>`
-  ).join('');
-  list.querySelector('.exp-item').click();
-});
+fetch('api/tree')
+  .then(r => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  })
+  .then(groups => {
+    const list = document.getElementById('exp-list');
+    if (!groups.length) {
+      list.innerHTML = '<div style="padding:16px;color:var(--gray);font-size:13px">No experiments found</div>';
+      return;
+    }
+    list.innerHTML = groups.map(g =>
+      `<div class="exp-item" onclick="loadGroup('${escAttr(g)}', this)">${escHtml(g)}</div>`
+    ).join('');
+  })
+  .catch(error => {
+    document.getElementById('exp-list').innerHTML =
+      `<div style="padding:16px;color:#cf222e;font-size:13px">Load failed: ${escHtml(error.message)}</div>`;
+  });
 
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -201,11 +213,28 @@ function escAttr(s) {
 function loadGroup(name, el) {
   document.querySelectorAll('.exp-item').forEach(e => e.classList.remove('active'));
   el.classList.add('active');
-  document.getElementById('empty-hint').style.display = 'none';
-  document.getElementById('charts-grid').style.display = 'grid';
-  fetch('/api/stats?group=' + encodeURIComponent(name))
-    .then(r => r.json())
-    .then(data => { rawData = data; redraw(); });
+  const hint = document.getElementById('empty-hint');
+  hint.style.display = 'block';
+  hint.textContent = 'Loading statistics…';
+  document.getElementById('charts-grid').style.display = 'none';
+  document.getElementById('stats-meta').textContent = '';
+  fetch('api/stats?group=' + encodeURIComponent(name))
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .then(data => {
+      rawData = data;
+      hint.style.display = 'none';
+      document.getElementById('charts-grid').style.display = 'grid';
+      document.getElementById('stats-meta').textContent = data.sampled
+        ? `Sampled ${data.file_count} / ${data.total_file_count} checkpoints`
+        : `${data.file_count} checkpoints`;
+      redraw();
+    })
+    .catch(error => {
+      hint.textContent = `Load failed: ${error.message}`;
+    });
 }
 
 function redraw() {
@@ -255,85 +284,23 @@ def api_stats():
     search_dir = (TRAJ_DIR / group) if group else TRAJ_DIR
 
     def sort_key(p: Path):
-        return int(p.stem) if p.stem.isdigit() else p.stem
+        return (0, int(p.stem)) if p.stem.isdigit() else (1, p.stem)
 
-    files = sorted(
+    all_files = sorted(
         search_dir.glob("*.jsonl") if group else search_dir.rglob("*.jsonl"),
         key=sort_key,
     )
-    if not files:
+    if not all_files:
         return jsonify({"labels": [], "tool_freq": {}, "tool_reward": {}, "tool_fail": {}, "nmr_ranks": [], "nmr_acc": {}, "turn_tool_counts": {}})
 
+    total_file_count = len(all_files)
+    files = _sample_files(all_files, MAX_FILES)
     labels: list[str] = []
     per_file: list[dict] = []
 
     for path in files:
         labels.append(path.stem)
-        fc: dict[str, int] = {}
-        fr: dict[str, float] = {}
-        ff: dict[str, list[int]] = {}  # tool -> [fails, total]
-        nr: list[int] = []
-        r1: list[int] = []   # rank_1 acc (0/1) for every nmr_generate call
-        ra: list[int] = []   # rank_all acc (0/1) for every nmr_generate call
-        tc1: list[int] = []  # tool call count before first follow-up user turn
-        tc2: list[int] = []  # tool call count after first follow-up user turn
-
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    d = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                score = float(d.get("score", 0))
-                gts = d.get("gts", "")
-                output = d.get("output", "")
-
-                for tool_name, response in _parse_tool_segments(output):
-                    fc[tool_name] = fc.get(tool_name, 0) + 1
-                    fr[tool_name] = fr.get(tool_name, 0.0) + score
-                    counts = ff.setdefault(tool_name, [0, 0])
-                    counts[1] += 1
-                    if _is_failure(response):
-                        counts[0] += 1
-                    if tool_name == "nmr_generate" and score > 0.5:
-                        rank = _nmr_rank(response, gts)
-                        if rank is not None:
-                            nr.append(rank)
-                    if tool_name == "nmr_generate" and gts:
-                        try:
-                            cands = json.loads(response).get("data", {}).get("candidates", [])
-                            hit_all = int(any(
-                                c.get("smiles") == gts or c.get("canonical_smiles") == gts
-                                for c in cands
-                            ))
-                            hit_1 = int(bool(cands) and (
-                                cands[0].get("smiles") == gts or cands[0].get("canonical_smiles") == gts
-                            ))
-                            ra.append(hit_all)
-                            r1.append(hit_1)
-                        except (json.JSONDecodeError, AttributeError, TypeError):
-                            pass
-
-                # Per-turn tool call counts: strip tool_response user wrappers,
-                # then split at the first remaining user turn (follow-up query).
-                cleaned = re.sub(
-                    r"\buser\s*\n\s*(<tool_response>.*?</tool_response>)\s*\nassistant",
-                    r"\1", output, flags=re.DOTALL,
-                )
-                followup = re.search(r"\buser\s*\n", cleaned)
-                if followup:
-                    before_text = cleaned[:followup.start()]
-                    after_text  = cleaned[followup.start():]
-                    tc1.append(len(re.findall(r"<tool_call>", before_text)))
-                    tc2.append(len(re.findall(r"<tool_call>", after_text)))
-                else:
-                    tc1.append(len(re.findall(r"<tool_call>", cleaned)))
-
-        per_file.append({"fc": fc, "fr": fr, "ff": ff, "nr": nr, "r1": r1, "ra": ra, "tc1": tc1, "tc2": tc2})
+        per_file.append(_summarize_file(path))
 
     all_tools = sorted({t for d in per_file for t in d["fc"]})
     tool_freq   = {t: [d["fc"].get(t, 0)   for d in per_file] for t in all_tools}
@@ -360,6 +327,9 @@ def api_stats():
 
     return jsonify({
         "labels":           labels,
+        "file_count":       len(files),
+        "total_file_count": total_file_count,
+        "sampled":          len(files) < total_file_count,
         "tool_freq":        tool_freq,
         "tool_reward":      tool_reward,
         "tool_fail":        tool_fail,
@@ -369,14 +339,110 @@ def api_stats():
     })
 
 
+def _sample_files(files: list[Path], max_files: int) -> list[Path]:
+    """Evenly sample checkpoints while always retaining the first and last."""
+    if max_files <= 0 or len(files) <= max_files:
+        return files
+    if max_files == 1:
+        return [files[-1]]
+    last = len(files) - 1
+    return [files[round(i * last / (max_files - 1))] for i in range(max_files)]
+
+
+def _summarize_file(path: Path) -> dict:
+    stat = path.stat()
+    cached = _FILE_STATS_CACHE.get(str(path))
+    if cached and cached[:2] == (stat.st_mtime_ns, stat.st_size):
+        return cached[2]
+
+    fc: dict[str, int] = {}
+    fr: dict[str, float] = {}
+    ff: dict[str, list[int]] = {}
+    nr: list[int] = []
+    r1: list[int] = []
+    ra: list[int] = []
+    tc1: list[int] = []
+    tc2: list[int] = []
+
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            score = float(d.get("score", 0))
+            gts = d.get("gts", "")
+            output = d.get("output", "")
+
+            for tool_name, response in _parse_tool_segments(output):
+                fc[tool_name] = fc.get(tool_name, 0) + 1
+                fr[tool_name] = fr.get(tool_name, 0.0) + score
+                counts = ff.setdefault(tool_name, [0, 0])
+                counts[1] += 1
+                if _is_failure(response):
+                    counts[0] += 1
+                if tool_name == "nmr_generate" and score > 0.5:
+                    rank = _nmr_rank(response, gts)
+                    if rank is not None:
+                        nr.append(rank)
+                if tool_name == "nmr_generate" and gts:
+                    try:
+                        cands = json.loads(response).get("data", {}).get("candidates", [])
+                        hit_all = int(
+                            any(
+                                c.get("smiles") == gts or c.get("canonical_smiles") == gts
+                                for c in cands
+                            )
+                        )
+                        hit_1 = int(
+                            bool(cands)
+                            and (
+                                cands[0].get("smiles") == gts
+                                or cands[0].get("canonical_smiles") == gts
+                            )
+                        )
+                        ra.append(hit_all)
+                        r1.append(hit_1)
+                    except (json.JSONDecodeError, AttributeError, TypeError):
+                        pass
+
+            cleaned = re.sub(
+                r"\buser\s*\n\s*(<tool_response>.*?</tool_response>)\s*\nassistant",
+                r"\1",
+                output,
+                flags=re.DOTALL,
+            )
+            followup = re.search(r"\buser\s*\n", cleaned)
+            if followup:
+                tc1.append(len(re.findall(r"<tool_call>", cleaned[: followup.start()])))
+                tc2.append(len(re.findall(r"<tool_call>", cleaned[followup.start() :])))
+            else:
+                tc1.append(len(re.findall(r"<tool_call>", cleaned)))
+
+    result = {"fc": fc, "fr": fr, "ff": ff, "nr": nr, "r1": r1, "ra": ra, "tc1": tc1, "tc2": tc2}
+    _FILE_STATS_CACHE[str(path)] = (stat.st_mtime_ns, stat.st_size, result)
+    return result
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=7861)
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--traj-dir", default=str(DEFAULT_TRAJ_DIR))
+    parser.add_argument(
+        "--max-files",
+        type=int,
+        default=80,
+        help="Maximum evenly sampled checkpoints per experiment; 0 loads all (default: 80)",
+    )
     args = parser.parse_args()
 
     TRAJ_DIR = Path(args.traj_dir).resolve()
+    MAX_FILES = args.max_files
     print(f"Serving tool statistics from: {TRAJ_DIR}")
     print(f"Open http://localhost:{args.port}")
     app.run(host=args.host, port=args.port, debug=False)

@@ -372,7 +372,8 @@ python -m spectune.rollout \
     --max-concurrency        6 \
     --tensor-parallel-size   8 \
     --max-model-len          20000 \
-    --gpu-memory-utilization 0.85
+    --gpu-memory-utilization 0.85 \
+    --prompt       think_rdkit
 ```
 
 `--max-concurrency` caps in-flight LLM requests in all modes; for local vLLM it also
@@ -426,14 +427,14 @@ cd /path/to/spectune
 # (spectune.rollout, spectune.rollout.eval, spectune.artifacts compile).
 python -m spectune.rollout.postprocess \
     --input      outputs/datasets/sft/*.jsonl \
-    --output     outputs/datasets/verl/sft.parquet \
+    --output     outputs/datasets/verl/sft_raw.parquet \
     --min-reward 0.1 \
     --seed       42
 
 # Also remove samples longer than the SFT context window
 python -m spectune.rollout.postprocess \
     --input         outputs/datasets/sft/*.jsonl \
-    --output        outputs/datasets/verl/sft.parquet \
+    --output        outputs/datasets/verl/sft_raw.parquet \
     --min-reward    0.1 \
     --drop-overlong \
     --tokenizer     /path/to/models/qwen3-8b \
@@ -452,6 +453,72 @@ Key flags:
 | `--tokenizer` | none | Hugging Face tokenizer name or local path; required with `--drop-overlong` |
 | `--max-length` | `32768` | Maximum rendered conversation length used by `--drop-overlong` |
 | `--no-progress` | off | Suppress per-file progress output |
+
+## Refine SFT Trajectories
+
+Optionally run a teacher-model refinement pass after `spectune.rollout.postprocess`
+and before SFT. `spectune.rollout.refine` reads each Parquet row's `messages`,
+asks a litellm model to return only one reasoning rewrite per assistant turn,
+then reconstructs the trajectory deterministically and validates it against the
+v1 contract. The model reads tool results as context but never regenerates them:
+the current reasoning prefix is combined with the source system message's full
+`# Tools` schema, while user messages and `<tool_response>` blocks are copied
+by code. Existing tool calls and final SMILES answers are parsed and normalized
+by code. Tool-calling trajectories without tool descriptions are rejected.
+Model-fabricated response blocks embedded inside assistant text are discarded;
+only source messages whose role is `user` are accepted as real tool evidence.
+
+Configure the litellm endpoint, then pass the teacher model name explicitly:
+
+```bash
+cd /path/to/spectune
+
+export LITELLM_API_KEY=...
+export LITELLM_API_BASE=https://your-litellm-endpoint/v1
+
+python -m spectune.rollout.refine \
+    --input           outputs/datasets/verl/sft_raw.parquet \
+    --output          outputs/datasets/verl/sft.parquet \
+    --model           openai/gemini-3.5-flash \
+    --max-tokens      32768 \
+    --max-concurrency 4
+```
+
+All rows are refined by default. Use the repeatable, zero-based `--row` flag for
+a small review run; when supplied, the output contains only those selected rows:
+
+```bash
+python -m spectune.rollout.refine \
+    --input  outputs/datasets/verl/sft_raw.parquet \
+    --output outputs/datasets/verl/sft_preview.parquet \
+    --model  openai/specxmaster/global.anthropic.claude-opus-4-8 \
+    --row 0 \
+    --row 25
+```
+
+The output preserves all source columns, replaces `messages`, and adds
+`refine_status`, `refine_error`, `refine_model`, and `refine_source_row`.
+By default an invalid or failed model response keeps the original messages and
+sets `refine_status=error`; use `--on-error raise` to abort without writing the
+destination instead.
+
+Key flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input` | *(required)* | Postprocessed SFT Parquet containing a `messages` column |
+| `--output` | *(required)* | Destination refined Parquet; must differ from input |
+| `--model` | *(required)* | litellm teacher model name |
+| `--row` | all rows | Zero-based source row to refine; repeat to select multiple rows |
+| `--temperature` | `0.2` | Teacher-model sampling temperature |
+| `--top-p` | `0.95` | Top-p nucleus sampling |
+| `--max-tokens` | `32768` | Maximum tokens in the assistant-reasoning rewrite response |
+| `--timeout` | `600` | Per-request timeout in seconds |
+| `--max-retries` | `2` | litellm retries after a failed request |
+| `--max-concurrency` | `4` | Maximum concurrent teacher-model requests |
+| `--batch-size` | `16` | Rows retained in each in-memory async batch |
+| `--on-error` | `keep` | Keep the original row with error metadata, or `raise` and abort |
+| `--no-progress` | off | Suppress batch progress output |
 
 Then Launch SFT.
 
@@ -545,6 +612,18 @@ python -m spectune.rollout.eval \
     --top-p        0.95 \
     --nmr-gen-topk 10 \
     --max-concurrency 8
+```
+
+```bash
+python -m spectune.rollout.eval \
+    --input        outputs/datasets/verl/test.parquet \
+    --output       outputs/trajectories/eval/eval_claude_opus_48_max_tokens_50k.jsonl \
+    --backend      litellm \
+    --model        openai/specxmaster/global.anthropic.claude-opus-4-8 \
+    --max-tokens   50000 \
+    --nmr-gen-topk 15 \
+    --max-concurrency 4 \
+    --prompt think_rdkit
 ```
 
 Progress is checkpointed to `<output>.checkpoint.jsonl` the same way as
