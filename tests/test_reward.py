@@ -53,6 +53,23 @@ def test_free_form_literal_gt_requires_legacy_mode():
     assert legacy.score == pytest.approx(_DEFAULT_GT_WEIGHT)
 
 
+def test_empty_gt_rewarded_only_for_explicit_empty_answer():
+    evaluator = RewardEvaluator()
+
+    # Correct: agent explicitly outputs an empty list
+    correct = evaluator.evaluate(format_final_answer([]), "")
+    assert correct.components["gt_smiles"] == pytest.approx(1.0)
+    assert correct.details["gt_rank"] is None
+
+    # Wrong: agent outputs a SMILES when gt is empty
+    wrong = evaluator.evaluate(format_final_answer(["CCO"]), "")
+    assert wrong.components["gt_smiles"] == pytest.approx(0.0)
+
+    # Wrong: agent outputs unparseable text (empty result not from {"smiles": []})
+    garbage = evaluator.evaluate([{"role": "assistant", "content": "No structure found."}], "")
+    assert garbage.components["gt_smiles"] == pytest.approx(0.0)
+
+
 def test_invalid_smiles_is_penalized_once():
     result = RewardEvaluator().evaluate(format_final_answer(["CCO", "C1CC", "C1CCC"]), "CCO")
 

@@ -12,6 +12,7 @@ from typing import Any
 from spectune.format.v1 import TOOL_CALL_END, TOOL_CALL_START, TOOL_RESPONSE_END, TOOL_RESPONSE_START
 from spectune.format.v1 import extract_smiles_candidates as extract_v1_smiles
 from spectune.format.v1 import extract_tool_calls as extract_v1_tool_calls
+from spectune.format.v1 import final_answer_region
 from spectune.format.v1 import messages_from_decoded_hermes
 
 from .base import JsonDict, RewardResult
@@ -112,7 +113,14 @@ class RewardEvaluator:
                 pass
 
         config = self.config
-        gt_reward = config.gt_match_reward * config.rank_discount ** (gt_rank - 1) if gt_rank is not None else 0.0
+        if not gt_smiles:
+            # Empty gt means the correct answer is an empty candidate list.
+            # Only reward when the agent explicitly output {"smiles": []} — not
+            # when it produced unparseable output that happened to yield [].
+            explicit_empty = _has_explicit_smiles_answer(final_answer, strict=config.strict_answer_format)
+            gt_reward = config.gt_match_reward if (explicit_empty and not raw_candidates) else 0.0
+        else:
+            gt_reward = config.gt_match_reward * config.rank_discount ** (gt_rank - 1) if gt_rank is not None else 0.0
         tool_format_reward = config.invalid_tool_call_penalty * invalid_call_count
         smiles_validity_reward = config.invalid_smiles_penalty if invalid_candidates else 0.0
         tool_call_count = len(calls) + len(malformed_calls)
@@ -448,6 +456,30 @@ def _extract_answer_candidates(text: str, *, strict: bool) -> list[str]:
     if strict:
         return extract_v1_smiles(text)
     return _extract_legacy_answer_candidates(text)
+
+
+def _has_explicit_smiles_answer(text: str, *, strict: bool) -> bool:
+    """Return True if ``text`` contains a real ``{"smiles": [...]}`` object.
+
+    Distinguishes an explicitly empty answer (e.g. ``{"smiles": []}``) from a
+    malformed reply that simply failed to parse into candidates.
+    """
+    region = final_answer_region(text) if text else ""
+    if not region:
+        return False
+    # Check bare JSON in the region
+    for blob in [region] + re.findall(r"```(?:json)?\s*(.*?)```", region, re.DOTALL | re.IGNORECASE):
+        blob = blob.strip()
+        if not blob:
+            continue
+        try:
+            parsed = json.loads(blob)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict) and "smiles" in parsed:
+            return True
+    # Fallback: regex presence of the key (covers partial/non-strict blobs)
+    return bool(re.search(r'"smiles"\s*:\s*\[', region))
 
 
 def _extract_legacy_answer_candidates(text: str) -> list[str]:
