@@ -179,6 +179,11 @@ def add_llm_args(p: argparse.ArgumentParser) -> None:
         ),
     )
     p.add_argument("--no-progress", action="store_true", help="Suppress progress bar.")
+    p.add_argument(
+        "--no-cache-tool-results",
+        action="store_true",
+        help="Disable disk caching of tool results (enabled by default).",
+    )
 
 
 def build_rollout_config(args: argparse.Namespace) -> RolloutConfig:
@@ -195,6 +200,7 @@ def build_rollout_config(args: argparse.Namespace) -> RolloutConfig:
         max_concurrency=args.max_concurrency,
         show_progress=not args.no_progress,
         skills=tuple(args.skills) if args.skills else (),
+        cache_tool_results=not args.no_cache_tool_results,
     )
 
 

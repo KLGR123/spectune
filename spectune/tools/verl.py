@@ -25,6 +25,7 @@ from uuid import uuid4
 from spectune.tools.base import compact_tool_payload
 from spectune.tools.catalog import (
     DEFAULT_RL_TOOL_NAMES,
+    build_manager,
     openai_schema_for,
     reset_shared_manager,
     resolve_tool_names,
@@ -32,7 +33,6 @@ from spectune.tools.catalog import (
     shared_manager,
 )
 from spectune.tools.config import NMR_GENERATE_MAX_TOPK, ToolManagerConfig
-from spectune.tools.manager import ToolManager
 
 JsonDict = dict[str, Any]
 
@@ -210,7 +210,7 @@ class SpectuneTool:
         topk = self.config.get("nmr_gen_topk")
         self._manager = None
         if topk is not None:
-            self._manager = ToolManager.from_config(ToolManagerConfig(nmr_gen_topk=topk))
+            self._manager = build_manager(ToolManagerConfig(nmr_gen_topk=topk))
         manager = self._manager or shared_manager()
         self.tool_schema = PreservedOpenAIToolSchema(openai_schema_for(self._tool_name, manager=manager))
         self.name = self.tool_schema.function.name
@@ -284,6 +284,7 @@ __all__ = [
     "DEFAULT_RL_TOOL_NAMES",
     "PreservedOpenAIToolSchema",
     "SpectuneTool",
+    "build_manager",
     "build_tools_config",
     "openai_schema_for",
     "reset_shared_manager",

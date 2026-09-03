@@ -2,7 +2,8 @@
 
 from .askcos_reaction_forward_predict import AskcosReactionForwardPredictTool
 from .base import Tool, ToolResult, compact_tool_payload
-from .catalog import DEFAULT_RL_TOOL_NAMES, resolve_tool_names, schemas_for_names
+from .cache import CachedToolManager, ToolCache, ToolCacheConfig
+from .catalog import DEFAULT_RL_TOOL_NAMES, build_manager, resolve_tool_names, schemas_for_names
 from .code_interpreter import CodeInterpreterTool
 from .config import (
     AskcosReactionForwardPredictConfig,
@@ -36,6 +37,9 @@ from .wikipedia_search import WikipediaSearchTool
 __all__ = [
     "AskcosReactionForwardPredictConfig",
     "AskcosReactionForwardPredictTool",
+    "CachedToolManager",
+    "ToolCache",
+    "ToolCacheConfig",
     "CodeInterpreterConfig",
     "CodeInterpreterTool",
     "CrossrefSearchConfig",

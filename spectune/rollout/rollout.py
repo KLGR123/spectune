@@ -19,12 +19,12 @@ from spectune.jsonl import write_jsonl as _write_jsonl
 from spectune.llm import LlmClient, LlmClientProtocol, LlmConfig
 from spectune.tools import (
     DEFAULT_RL_TOOL_NAMES,
-    ToolManager,
     ToolManagerConfig,
     compact_tool_payload,
     resolve_tool_names,
     schemas_for_names,
 )
+from spectune.tools.catalog import build_manager
 
 from .config import RolloutConfig
 from .sampling.base import BaseSampler
@@ -158,8 +158,8 @@ class Rollout:
             )
         )
         # One manager per run; nmr_gen_topk lands in NmrGenerateConfig so the
-        # schema default and execution both honor it.
-        self.tool_manager = ToolManager.from_config(ToolManagerConfig(nmr_gen_topk=self.config.nmr_gen_topk))
+        # schema default and execution both honor it. Honors cache_tool_results.
+        self.tool_manager = build_manager(ToolManagerConfig(nmr_gen_topk=self.config.nmr_gen_topk, cache_tool_results=self.config.cache_tool_results))
         names = tuple(self.config.tool_names) or DEFAULT_RL_TOOL_NAMES
         self.tool_names = resolve_tool_names(names, manager=self.tool_manager)
         schemas = schemas_for_names(self.tool_names, manager=self.tool_manager)

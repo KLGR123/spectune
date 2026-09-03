@@ -118,6 +118,7 @@ def test_build_rollout_config_reads_shared_cli_args():
         max_assistant_turns=8,
         max_concurrency=4,
         no_progress=True,
+        no_cache_tool_results=False,
         prompt=DEFAULT_PROMPT_VERSION,
         skills=None,
     )

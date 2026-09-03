@@ -28,6 +28,10 @@ export NMR_RANK_API_URL=<url>               # nmr_rerank
 export NMR_PREDICT_API_URL=<url>            # nmr_forward_predict (needs `pip install spectune[mcp]`)
 export NMREXP_SEARCH_MCP_BASE_URL=<url>     # nmrexp_search
 
+# Tool result cache (optional, enabled by default)
+export SPECTUNE_TOOL_CACHE_DIR=/path/to/spectune/cache   # default: <repo>/cache
+export SPECTUNE_TOOL_CACHE_MAX_SIZE=20000                # max entries per tool
+
 source secrets.env
 ```
 
@@ -395,6 +399,7 @@ Key flags:
 | `--tools` | `DEFAULT_RL_TOOL_NAMES` | Tool names exposed to the model |
 | `--max-assistant-turns` | `16` | Max LLM generations per agent loop (matches verl `multi_turn.max_assistant_turns`) |
 | `--max-concurrency` | `8` | Max concurrent LLM requests |
+| `--no-cache-tool-results` | off | Disable disk caching of tool call results (cache is on by default) |
 | `--skills` | off | Skill file(s) (default: `.md`) appended to the end of the system prompt, one per file separated by a newline |
 | `--prompt` | `think_rdkit` | System prompt version: `basic`, `think`, `think_rdkit` (see `SYSTEM_PROMPT_REGISTRY` in `spectune.format.v1`) |
 | `--backend` | `http` | LLM backend: `http` (direct OpenAI-compatible), `litellm` (100+ providers), or `local` (auto-starts vLLM) |

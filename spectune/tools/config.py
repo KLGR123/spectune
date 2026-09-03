@@ -243,6 +243,9 @@ class ToolManagerConfig:
     # Overrides NmrGenerateConfig.default_topk when set (e.g. from the rollout /
     # verl tool-config surfaces). Kept separate so env-based defaults stay intact.
     nmr_gen_topk: int | None = None
+    # When True (default), wrap the ToolManager with CachedToolManager so every
+    # invoke() call checks the disk cache before hitting the remote service.
+    cache_tool_results: bool = True
 
     def __post_init__(self) -> None:
         if self.nmr_gen_topk is not None:

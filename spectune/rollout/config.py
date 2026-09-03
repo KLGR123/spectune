@@ -49,6 +49,9 @@ class RolloutConfig:
     # Optional skill files (default: .md) whose contents are appended to the
     # end of the system prompt, one per line separator. Empty by default (off).
     skills: tuple[str, ...] = ()
+    # When True (default), wrap the ToolManager with CachedToolManager so every
+    # tool call checks the disk cache before hitting the remote service.
+    cache_tool_results: bool = True
 
     def __post_init__(self) -> None:
         if self.max_rounds is not None and self.max_rounds < 1:

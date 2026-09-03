@@ -10,11 +10,14 @@ from __future__ import annotations
 import copy
 from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any
+from typing import Any, Union
 
+from spectune.tools.cache import CachedToolManager
+from spectune.tools.config import ToolManagerConfig
 from spectune.tools.manager import ToolManager
 
 JsonDict = dict[str, Any]
+AnyManager = Union[ToolManager, CachedToolManager]
 
 # Curated default set for structure-elucidation RL. Override via CLI / YAML.
 DEFAULT_RL_TOOL_NAMES: tuple[str, ...] = (
@@ -28,9 +31,23 @@ DEFAULT_RL_TOOL_NAMES: tuple[str, ...] = (
 )
 
 
+def build_manager(config: ToolManagerConfig | None = None) -> AnyManager:
+    """Build a ToolManager (or CachedToolManager) from *config*.
+
+    When ``config.cache_tool_results`` is True (the default), the returned
+    manager transparently checks the disk cache before hitting remote services.
+    Pass ``ToolManagerConfig(cache_tool_results=False)`` to skip the cache.
+    """
+    config = config or ToolManagerConfig()
+    manager = ToolManager.from_config(config)
+    if config.cache_tool_results:
+        return CachedToolManager(manager)
+    return manager
+
+
 @lru_cache(maxsize=1)
-def _shared_manager() -> ToolManager:
-    return ToolManager.from_config()
+def _shared_manager() -> AnyManager:
+    return build_manager()
 
 
 def reset_shared_manager() -> None:
@@ -38,15 +55,15 @@ def reset_shared_manager() -> None:
     _shared_manager.cache_clear()
 
 
-def shared_manager() -> ToolManager:
-    """Return the process-wide :class:`ToolManager` used by RL adapters."""
+def shared_manager() -> AnyManager:
+    """Return the process-wide manager used by RL adapters (cached by default)."""
     return _shared_manager()
 
 
 def resolve_tool_names(
     tool_names: Sequence[str] | None = None,
     *,
-    manager: ToolManager | None = None,
+    manager: AnyManager | None = None,
 ) -> tuple[str, ...]:
     """Validate and return tool names that should be exposed to trainers."""
     tool_manager = manager or _shared_manager()
@@ -57,7 +74,7 @@ def resolve_tool_names(
     return names
 
 
-def openai_schema_for(tool_name: str, manager: ToolManager | None = None) -> JsonDict:
+def openai_schema_for(tool_name: str, manager: AnyManager | None = None) -> JsonDict:
     """Return a deep-copied OpenAI function schema for one Spectune tool."""
     tool_manager = manager or _shared_manager()
     return copy.deepcopy(tool_manager.get(tool_name).schema)
@@ -66,7 +83,7 @@ def openai_schema_for(tool_name: str, manager: ToolManager | None = None) -> Jso
 def schemas_for_names(
     tool_names: Sequence[str],
     *,
-    manager: ToolManager | None = None,
+    manager: AnyManager | None = None,
 ) -> list[JsonDict]:
     """Return full OpenAI schemas for the given tool names (order preserved)."""
     names = resolve_tool_names(tool_names, manager=manager)
@@ -76,6 +93,7 @@ def schemas_for_names(
 
 __all__ = [
     "DEFAULT_RL_TOOL_NAMES",
+    "build_manager",
     "openai_schema_for",
     "reset_shared_manager",
     "resolve_tool_names",

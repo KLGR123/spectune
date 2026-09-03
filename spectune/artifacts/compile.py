@@ -105,9 +105,9 @@ def compile_sample(
     prompt: list[JsonDict] = [{"role": "system", "content": config.system_prompt}] + user_turns
     raw_prompt: list[JsonDict] = [{"role": "system", "content": config.system_prompt}, user_turns[0]]
 
-    gt_smiles = sample.get("gt_smiles")
-    if not isinstance(gt_smiles, str) or not gt_smiles.strip():
-        raise ValueError("sample must contain a non-empty gt_smiles string")
+    gt_smiles = sample.get("gt_smiles") or ""
+    if not isinstance(gt_smiles, str):
+        gt_smiles = ""
 
     tool_names = tuple(config.tool_names)
     # PyArrow cannot encode empty structs (``{}``) to Parquet. Spectune tools
