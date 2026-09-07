@@ -10,7 +10,7 @@ EXPERIMENT_NAME=sft-all-rollout-qwen3-8b
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SPECTUNE_ROOT="${SPECTUNE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-export VERL_ROOT="${VERL_ROOT:-$(cd "$(dirname "$SPECTUNE_ROOT")/verl" && pwd)}"
+export VERL_ROOT="${VERL_ROOT:-$(cd "$SPECTUNE_ROOT/verl" && pwd)}"
 export MODEL_PATH=/fs_mol/liujiarun/models/qwen3-8b
 export TRAIN_FILE=$SPECTUNE_ROOT/outputs/datasets/verl/sft.parquet
 

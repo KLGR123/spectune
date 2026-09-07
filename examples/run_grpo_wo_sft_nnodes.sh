@@ -10,7 +10,7 @@ RAY_GCS_ADDRESS="${RAY_GCS_ADDRESS:-172.18.1.86:6379}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SPECTUNE_ROOT="${SPECTUNE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
-export VERL_ROOT="${VERL_ROOT:-$(cd "$(dirname "$SPECTUNE_ROOT")/verl" && pwd)}"
+export VERL_ROOT="${VERL_ROOT:-$(cd "$SPECTUNE_ROOT/verl" && pwd)}"
 
 export TRAIN_FILE=$SPECTUNE_ROOT/outputs/datasets/verl/train.parquet
 export TEST_FILE=$SPECTUNE_ROOT/outputs/datasets/verl/test.parquet
@@ -20,8 +20,6 @@ export TENSORBOARD_DIR="${SPECTUNE_ROOT}/outputs/tensorboard/${PROJECT_NAME}/${E
 
 cd "${VERL_ROOT}"
 
-# actor_rollout_ref.actor.fsdp_config.param_offload=True \
-# actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
 
 python3 -m verl.trainer.main_ppo \
   "+ray_kwargs.ray_init.address=${RAY_GCS_ADDRESS}" \
@@ -36,7 +34,7 @@ python3 -m verl.trainer.main_ppo \
   data.val_files="${TEST_FILE}" \
   data.train_batch_size=32 \
   data.max_prompt_length=4096 \
-  data.max_response_length=16384 \
+  data.max_response_length=14336 \
   data.filter_overlong_prompts=True \
   data.truncation=error \
   actor_rollout_ref.model.path="${MODEL_PATH}" \
@@ -53,7 +51,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.entropy_coeff=0.001 \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.rollout.name=vllm \
-  actor_rollout_ref.rollout.mode=async \
+  actor_rollout_ref.rollout.mode=sync \
   actor_rollout_ref.rollout.n=4 \
   actor_rollout_ref.rollout.temperature=0.8 \
   actor_rollout_ref.rollout.top_p=1.0 \
@@ -75,7 +73,7 @@ python3 -m verl.trainer.main_ppo \
   trainer.experiment_name="${EXPERIMENT_NAME}" \
   trainer.n_gpus_per_node="${NDEVICES_PER_NODE}" \
   trainer.nnodes="${NNODES}" \
-  trainer.save_freq=250 \
+  trainer.save_freq=50 \
   trainer.test_freq=50 \
   trainer.val_before_train=False \
   trainer.total_epochs=2 \
@@ -85,6 +83,13 @@ python3 -m verl.trainer.main_ppo \
   trainer.rollout_data_dir="${SPECTUNE_ROOT}/outputs/trajectories/${PROJECT_NAME}/${EXPERIMENT_NAME}" \
   actor_rollout_ref.model.use_liger=True \
   actor_rollout_ref.actor.use_dynamic_bsz=True \
-  actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=23000 \
-  actor_rollout_ref.actor.ppo_max_token_len_per_gpu=23000 \
-  actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=23000
+  actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=16000 \
+  actor_rollout_ref.actor.ppo_max_token_len_per_gpu=16000 \
+  actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=16000 \
+  actor_rollout_ref.actor.ulysses_sequence_parallel_size=4 \
+  actor_rollout_ref.ref.ulysses_sequence_parallel_size=4 \
+  actor_rollout_ref.actor.fsdp_config.ulysses_sequence_parallel_size=4 \
+  actor_rollout_ref.ref.fsdp_config.ulysses_sequence_parallel_size=4 \
+  actor_rollout_ref.actor.fsdp_config.param_offload=False \
+  actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
+  actor_rollout_ref.rollout.free_cache_engine=True
