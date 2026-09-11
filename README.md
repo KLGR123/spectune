@@ -591,6 +591,7 @@ TRAJ_DIR=outputs/trajectories/my-run \
 SFT_PARQUET=outputs/datasets/verl/train_sft_overlong_filtered.parquet \
 PORT_STATS_SFT=7864 \
 bash examples/debug/visualize.sh
+# SERVICES=eval bash examples/debug/visualize.sh
 ```
 
 ## Evaluate a Local Merged Model

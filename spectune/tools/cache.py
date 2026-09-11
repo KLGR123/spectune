@@ -72,18 +72,29 @@ class ToolCache:
         if result.completion == "failure":
             return
         tool_dir = self._tool_dir(tool_name)
-        tool_dir.mkdir(parents=True, exist_ok=True)
-        path = tool_dir / f"{self._cache_key(arguments)}.json"
-        payload = {"args": arguments, "result": result.to_dict()}
-        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        self._evict(tool_dir)
+        try:
+            tool_dir.mkdir(parents=True, exist_ok=True)
+            path = tool_dir / f"{self._cache_key(arguments)}.json"
+            payload = {"args": arguments, "result": result.to_dict()}
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            self._evict(tool_dir)
+        except OSError:
+            # Cache is best-effort: a failed write must never break the tool call.
+            return
 
     def _evict(self, tool_dir: Path) -> None:
         entries = list(tool_dir.glob("*.json"))
         excess = len(entries) - self._cfg.max_size_per_tool
         if excess <= 0:
             return
-        entries.sort(key=lambda p: p.stat().st_mtime)
+
+        def _mtime(p: Path) -> float:
+            try:
+                return p.stat().st_mtime
+            except OSError:
+                return 0.0
+
+        entries.sort(key=_mtime)
         for old in entries[:excess]:
             old.unlink(missing_ok=True)
 
@@ -137,7 +148,11 @@ class CachedToolManager:
             return hit
 
         result = await self._manager.invoke(name, arguments)
-        await asyncio.to_thread(self._cache.store, name, args_dict, result)
+        try:
+            await asyncio.to_thread(self._cache.store, name, args_dict, result)
+        except OSError:
+            # Cache write is best-effort; never let it surface as a tool failure.
+            pass
         return result
 
     @staticmethod

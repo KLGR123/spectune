@@ -51,7 +51,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.actor.entropy_coeff=0.001 \
   actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=2 \
   actor_rollout_ref.rollout.name=vllm \
-  actor_rollout_ref.rollout.mode=sync \
+  actor_rollout_ref.rollout.mode=async \
   actor_rollout_ref.rollout.n=4 \
   actor_rollout_ref.rollout.temperature=0.8 \
   actor_rollout_ref.rollout.top_p=1.0 \
@@ -92,4 +92,7 @@ python3 -m verl.trainer.main_ppo \
   actor_rollout_ref.ref.fsdp_config.ulysses_sequence_parallel_size=4 \
   actor_rollout_ref.actor.fsdp_config.param_offload=False \
   actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
-  actor_rollout_ref.rollout.free_cache_engine=True
+  actor_rollout_ref.rollout.free_cache_engine=True \
+  actor_rollout_ref.rollout.enable_chunked_prefill=True \
+  actor_rollout_ref.rollout.max_model_len=18432 \
+  actor_rollout_ref.rollout.max_num_batched_tokens=18432 \

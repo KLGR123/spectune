@@ -28,21 +28,41 @@ class NmrGenerateTool(Tool):
             "type": "object",
             "properties": {
                 "topk": {"type": "integer", "minimum": 1, "default": self.config.default_topk},
-                "beam_size": {"type": "integer", "minimum": 1, "description": "Generation beam size."},
-                "batch_size": {"type": "integer", "minimum": 1},
-                "nmr_type": {"type": "string", "description": "Optional override, e.g. 'CHF'."},
+                "beam_size": {"type": "integer", "minimum": 1, "description": "Generation beam size; defaults to topk."},
+                "batch_size": {"type": "integer", "minimum": 1, "description": "Inference batch size; defaults to 64."},
+                # nmr_type is inferred automatically from which peak arrays are present — not a caller parameter
                 "formula": {"type": "string", "description": "Target molecular formula."},
                 "molecular_formula": {"type": "string", "description": "Alias for formula."},
-                "h_nmr_peaks": {"type": "array", "items": {"type": "object"}},
-                "c_nmr_peaks": {"type": "array", "items": {"type": "object"}},
-                "h_shifts": {"type": "array", "items": {"type": "number"}, "description": "Raw 1H shifts (ppm)."},
-                "c_shifts": {"type": "array", "items": {"type": "number"}, "description": "Raw 13C shifts (ppm)."},
-                "h_split": {
+                "h_nmr_peaks": {
                     "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Multiplicities for h_shifts.",
+                    "items": {"type": "object"},
+                    "description": (
+                        "List of 1H peak objects as produced by parse_nmr_text. Each object "
+                        "contains: 'centroid' (float, ppm, midpoint of the peak range), "
+                        "'delta' (float, same value), 'nH' (int, number of protons), "
+                        "'category' (str, canonical multiplicity code, e.g. 's','d','t','q','m',"
+                        "'dd','td','dq','brs'), 'j_values' (str, J coupling constants in Hz "
+                        "joined by '_', e.g. '8.0_4.0'), and optionally 'rangeMax'/'rangeMin' "
+                        "(floats, ppm) when the peak spans a range. "
+                        "Do NOT split a range peak into two separate centroids."
+                    ),
                 },
-                "solvent": {"type": "string"},
+                "c_nmr_peaks": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": (
+                        "List of 13C peak objects as produced by parse_nmr_text. Each object "
+                        "contains 'delta (ppm)' (float, ppm — note the key name includes the "
+                        "unit in parentheses, exactly as output by the parser). "
+                        "'delta' or 'centroid' are also accepted as fallback key names."
+                    ),
+                },
+                # h_shifts / c_shifts / h_split: legacy flat-array form; not used in the primary API path
+                # "h_shifts": {"type": "array", "items": {"type": "number"}, "description": "Raw 1H shifts (ppm)."},
+                # "c_shifts": {"type": "array", "items": {"type": "number"}, "description": "Raw 13C shifts (ppm)."},
+                # "h_split": {"type": "array", "items": {"type": "string"}, "description": "Multiplicities for h_shifts."},
+                # solvent: read from the spectrum internally by spectrum_payload(); not a caller-provided parameter
+                # "solvent": {"type": "string"},
             },
             "required": [],
             "additionalProperties": False,
@@ -72,7 +92,7 @@ class NmrGenerateTool(Tool):
             "nmr_type": str(args.get("nmr_type") or infer_nmr_type(spectrum)),
             "rerank": False,
             "beam_size": int(args.get("beam_size") or topk),
-            "batch_size": int(args.get("batch_size") or args.get("beam_size") or topk),
+            "batch_size": int(args.get("batch_size") or 64),
         }
         try:
             raw = await asyncio.to_thread(post_json, self.config.api_url, payload, timeout=self.config.timeout_s)

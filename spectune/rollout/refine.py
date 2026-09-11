@@ -379,6 +379,7 @@ def _normalize_source_messages(messages: Sequence[Mapping[str, Any]]) -> list[Js
         elif role == "assistant":
             cleaned = _normalize_assistant_content(content)
             if cleaned:
+                cleaned = _inject_think_block(cleaned, message_index=index)
                 normalized.append({"role": "assistant", "content": cleaned})
         else:
             normalized.extend(_normalize_user_content(content))
@@ -411,6 +412,23 @@ def _assistant_suffix(content: str, *, message_index: int) -> str:
     if not preserved:
         raise ValueError(f"source assistant message {message_index} has no preservable answer content")
     return preserved
+
+
+def _inject_think_block(content: str, *, message_index: int) -> str:
+    """Wrap assistant content in <think> if it lacks one, preserving tool calls and final answer."""
+    if _THINK_PREFIX_RE.match(content):
+        return content
+    try:
+        suffix = _assistant_suffix(content, message_index=message_index)
+    except ValueError:
+        return content
+    reasoning = _TOOL_CALL_BLOCK_RE.sub("", content).strip()
+    smiles = extract_smiles_candidates(reasoning)
+    if smiles:
+        reasoning = reasoning.replace(format_final_answer(smiles), "").strip()
+    if not reasoning:
+        return f"<think>\n{suffix}\n</think>"
+    return f"<think>\n{reasoning}\n</think>\n{suffix}"
 
 
 def _rebuild_messages(source: list[JsonDict], rewrites: Mapping[int, str]) -> list[JsonDict]:
@@ -562,12 +580,19 @@ async def refine_parquet(
             print(f"  refined {min(start + batch_size, len(records)):>6}/{len(records)}", flush=True)
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(output_records).to_parquet(destination, index=False)
+    result_df = pd.DataFrame(output_records)
+    if "reward_score" in result_df.columns:
+        result_df = result_df[result_df["reward_score"] > 0]
+    if "sample_id" in result_df.columns:
+        result_df = result_df.drop_duplicates(subset="sample_id", keep="first")
+    result_df["enable_thinking"] = None
+    result_df.to_parquet(destination, index=False)
     refined_count = sum(record["refine_status"] == "refined" for record in output_records)
+    failed_count = sum(record["refine_status"] == "error" for record in output_records)
     return RefineStats(
-        total=len(output_records),
+        total=len(result_df),
         refined=refined_count,
-        failed=len(output_records) - refined_count,
+        failed=failed_count,
     )
 
 

@@ -11,14 +11,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SPECTUNE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 TRAJ_DIR="${TRAJ_DIR:-$SPECTUNE_ROOT/outputs/trajectories/rl}"
+EVAL_TRAJ_DIR="${EVAL_TRAJ_DIR:-$SPECTUNE_ROOT/outputs/trajectories/eval}"
 SFT_PARQUET="${SFT_PARQUET:-$SPECTUNE_ROOT/outputs/datasets/verl/sft.parquet}"
 PORT_TRAJ="${PORT_TRAJ:-7860}"
 PORT_STATS="${PORT_STATS:-7861}"
 PORT_ROLLOUT="${PORT_ROLLOUT:-7862}"
 PORT_STATS_SFT="${PORT_STATS_SFT:-7863}"
+PORT_EVAL="${PORT_EVAL:-7864}"
 RL_STATS_MAX_FILES="${RL_STATS_MAX_FILES:-80}"
 
-# all | rl | sft | comma-separated: rl-rollouts,rl-stats,sft-rollouts,sft-stats
+# all | rl | sft | eval | comma-separated: rl-rollouts,rl-stats,sft-rollouts,sft-stats,eval-rollouts
 SERVICES="${SERVICES:-all}"
 
 # Optional: set USE_NGROK=0 to disable ngrok tunnels
@@ -51,7 +53,8 @@ service_enabled() {
   [[ "$SERVICES" == "all" ]] \
     || [[ ",$SERVICES," == *",$name,"* ]] \
     || [[ "$name" == rl-* && ",$SERVICES," == *",rl,"* ]] \
-    || [[ "$name" == sft-* && ",$SERVICES," == *",sft,"* ]]
+    || [[ "$name" == sft-* && ",$SERVICES," == *",sft,"* ]] \
+    || [[ "$name" == eval-* && ",$SERVICES," == *",eval,"* ]]
 }
 
 start_service() {
@@ -85,6 +88,10 @@ fi
 if service_enabled sft-stats; then
   start_service "$SCRIPT_DIR/sft_stats.py" --parquet "$SFT_PARQUET" --port "$PORT_STATS_SFT"
   echo "SFT Stats         : http://localhost:$PORT_STATS_SFT"
+fi
+if service_enabled eval-rollouts; then
+  start_service "$SCRIPT_DIR/eval_rollouts.py" --traj-dir "$EVAL_TRAJ_DIR" --port "$PORT_EVAL"
+  echo "Eval Rollouts     : http://localhost:$PORT_EVAL"
 fi
 
 if ((${#PIDS[@]} == 0)); then
@@ -131,6 +138,14 @@ NGROK_EOF
 NGROK_EOF
     ((TUNNEL_COUNT+=1))
   fi
+  if service_enabled eval-rollouts; then
+    cat >> "$NGROK_CONF" <<NGROK_EOF
+  eval-rollouts:
+    proto: http
+    addr: $PORT_EVAL
+NGROK_EOF
+    ((TUNNEL_COUNT+=1))
+  fi
 
   ngrok start --all \
     --config="$HOME/.config/ngrok/ngrok.yml" \
@@ -167,6 +182,7 @@ try:
         'tool-stats':     'RL Tool Statistics',
         'rollout-viewer': 'SFT Teacher Rollouts Viewer',
         'sft-stats':      'SFT Dataset Statistics',
+        'eval-rollouts':  'Eval Rollouts Viewer',
     }
     for t in sorted(data.get('tunnels', []), key=lambda x: x.get('name','')):
         url = t.get('public_url', '')
