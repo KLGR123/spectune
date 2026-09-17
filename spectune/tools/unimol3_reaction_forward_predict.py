@@ -22,10 +22,9 @@ from .utils import as_list, molecular_formula, post_json, strict_canonical_smile
 class Unimol3ReactionForwardPredictTool(Tool):
     name = "unimol3_reaction_forward_predict"
     description = (
-        "Predict likely reaction products from reactant SMILES via an external Uni-Mol3 "
-        "forward-prediction model (remote HTTP; may be slow). Placeholder until deployed: with "
-        "no api_url set it reports status='unavailable'. Predictions are references worth "
-        "cross-checking; does not read NMR/MS spectra, so spectrum matching needs a follow-up NMR tool."
+        "通过外部 Uni-Mol3 正向预测模型（远程 HTTP，可能较慢），根据反应物 SMILES 预测可能的反应产物。"
+        "该服务部署前为占位实现：未设置 api_url 时返回 status='unavailable'。"
+        "预测结果是值得交叉核实的参考；不读取 NMR/MS 谱图，谱图匹配需要后续调用 NMR 相关工具。"
     )
 
     def __init__(self, config: Unimol3ReactionForwardPredictConfig | None = None) -> None:
@@ -39,24 +38,24 @@ class Unimol3ReactionForwardPredictTool(Tool):
             "properties": {
                 "reaction_smiles": {
                     "type": "string",
-                    "description": "Optional reaction SMILES, 'reactants>>products' or 'reactants>agents>products'.",
+                    "description": "可选的反应 SMILES，格式为 'reactants>>products' 或 'reactants>agents>products'。",
                 },
-                "reactants": {"type": "array", "items": {"type": "string"}, "description": "Reactant SMILES."},
-                "reagents": {"type": "array", "items": {"type": "string"}, "description": "Optional reagent SMILES."},
-                "solvent": {"type": "array", "items": {"type": "string"}, "description": "Optional solvent SMILES."},
+                "reactants": {"type": "array", "items": {"type": "string"}, "description": "反应物 SMILES。"},
+                "reagents": {"type": "array", "items": {"type": "string"}, "description": "可选的试剂 SMILES。"},
+                "solvent": {"type": "array", "items": {"type": "string"}, "description": "可选的溶剂 SMILES。"},
                 "conditions": {
                     "type": "string",
-                    "description": "Free-text conditions, sent through to the Uni-Mol3 service as provenance.",
+                    "description": "自由文本形式的反应条件，会作为溯源信息一并发送给 Uni-Mol3 服务。",
                 },
                 "reaction_type": {
                     "type": "string",
-                    "description": "Free-text reaction type hint, kept as provenance only.",
+                    "description": "自由文本形式的反应类型提示，仅作为溯源信息保留。",
                 },
-                "target_formula": {"type": "string", "description": "Optional target product molecular formula."},
+                "target_formula": {"type": "string", "description": "可选的目标产物分子式。"},
                 "constraints": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional functional-group hints checked against predicted products.",
+                    "description": "可选的官能团提示，用于核对预测产物。",
                 },
                 "topk": {"type": "integer", "minimum": 1, "maximum": 100, "default": config.default_topk},
             },

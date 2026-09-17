@@ -5,7 +5,7 @@ set -xeuo pipefail
 NNODES=2
 NDEVICES_PER_NODE=8
 PROJECT_NAME=rl
-EXPERIMENT_NAME=grpo-all-qwen3-32b-wo-sft-w-rdkit-prompt-w-exp-reward
+EXPERIMENT_NAME=dapo-qwen3-32b-v0.3
 RAY_GCS_ADDRESS="${RAY_GCS_ADDRESS:-172.18.1.86:6379}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

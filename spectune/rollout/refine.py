@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from spectune.format.v1 import (
-    SYSTEM_PROMPT_THINK_RDKIT,
+    SYSTEM_PROMPT_THINK,
     extract_smiles_candidates,
     extract_tool_calls,
     format_final_answer,
@@ -232,11 +232,11 @@ def _current_system_prompt(source_messages: Sequence[Mapping[str, Any]]) -> str:
     )
     marker = _TOOLS_MARKER_RE.search(source_system)
     if marker is None:
-        return SYSTEM_PROMPT_THINK_RDKIT
+        return SYSTEM_PROMPT_THINK
     tool_suffix = source_system[marker.start() :].strip()
     if "<tools>" not in tool_suffix or "</tools>" not in tool_suffix:
         raise ValueError("source system prompt has a malformed # Tools section")
-    return f"{SYSTEM_PROMPT_THINK_RDKIT.rstrip()}\n\n{tool_suffix}"
+    return f"{SYSTEM_PROMPT_THINK.rstrip()}\n\n{tool_suffix}"
 
 
 def _normalize_assistant_content(content: str) -> str:

@@ -46,7 +46,7 @@ class CodeInterpreterConfig:
     sandbox_url: str = field(
         default_factory=lambda: os.getenv("SANDBOX_FUSION_URL", os.getenv("sandbox_fusion_url", ""))
     )
-    timeout_s: int = 30
+    timeout_s: int = 60
     language: str = "python"
     memory_limit_mb: int = 1024
     python_executable: str = sys.executable
@@ -137,14 +137,37 @@ class ReactionLocalIndexSearchConfig:
     particular cluster's filesystem layout. The tool skips any source whose
     path is unset or does not exist on disk, and reports ``unavailable`` only
     if none of the three sources are usable.
+
+    ``prebuilt_index_dir``, when set, points at parquet files produced by
+    ``python -m spectune.tools build-reaction-index`` (one per source: e.g.
+    ``uspto.parquet``). These are pre-canonicalized with RDKit ahead of time,
+    so loading them at runtime skips RDKit entirely and is not subject to
+    ``max_chempile_records``/``max_pistachio_records``. When a prebuilt file
+    is missing, the corresponding source falls back to parsing the raw path
+    above (slow, capped by the ``max_*`` fields below).
     """
 
     uspto_csv_path: str = field(default_factory=lambda: os.getenv("RXN_LOCAL_INDEX_USPTO_CSV", ""))
     chempile_parquet_path: str = field(default_factory=lambda: os.getenv("RXN_LOCAL_INDEX_CHEMPILE_PARQUET", ""))
     pistachio_smi_path: str = field(default_factory=lambda: os.getenv("RXN_LOCAL_INDEX_PISTACHIO_SMI", ""))
+    prebuilt_index_dir: str = field(default_factory=lambda: os.getenv("RXN_LOCAL_INDEX_PREBUILT_DIR", ""))
     max_chempile_records: int = 50_000
     max_pistachio_records: int = 50_000
     default_topk: int = 20
+
+
+@dataclass(frozen=True, slots=True)
+class FragmentMatchConfig:
+    """Settings for the ``fragment_match`` terminal rerank-verification backend.
+
+    A stateless HTTP POST service: it accepts the full ``nmr_rerank`` candidate
+    ranking plus explicit fragment constraints, and returns a single
+    recommended candidate (either the verified top-1 or a fragment-supported
+    alternative).
+    """
+
+    api_url: str = field(default_factory=lambda: os.getenv("FRAGMENT_MATCH_API_URL", ""))
+    timeout_s: float = 60.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,6 +254,7 @@ class ToolManagerConfig:
     nmr_forward_predict: NmrForwardPredictConfig = field(default_factory=NmrForwardPredictConfig)
     nmrexp_search: NmrExpSearchConfig = field(default_factory=NmrExpSearchConfig)
     reaction_local_index_search: ReactionLocalIndexSearchConfig = field(default_factory=ReactionLocalIndexSearchConfig)
+    fragment_match: FragmentMatchConfig = field(default_factory=FragmentMatchConfig)
     askcos_reaction_forward_predict: AskcosReactionForwardPredictConfig = field(
         default_factory=AskcosReactionForwardPredictConfig
     )

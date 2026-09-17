@@ -13,6 +13,7 @@ already present in the environment:
 - ``NMREXP_SEARCH_MCP_BASE_URL`` for ``nmrexp_search``
 - ``RXN_LOCAL_INDEX_USPTO_CSV`` / ``RXN_LOCAL_INDEX_CHEMPILE_PARQUET`` /
   ``RXN_LOCAL_INDEX_PISTACHIO_SMI`` (at least one) for ``reaction_local_index_search``
+- ``FRAGMENT_MATCH_API_URL`` for ``fragment_match``
 - ``UNIMOL3_REACTION_FORWARD_PREDICT_API_URL`` for ``unimol3_reaction_forward_predict``
   (unset until a Uni-Mol3 service is deployed, so this test currently always skips)
 
@@ -38,6 +39,8 @@ import pytest
 from spectune import (
     CodeInterpreterConfig,
     CodeInterpreterTool,
+    FragmentMatchConfig,
+    FragmentMatchTool,
     NmrForwardPredictConfig,
     NmrForwardPredictTool,
     NmrGenerateConfig,
@@ -66,6 +69,7 @@ _HAS_LOCAL_REACTION_INDEX = bool(
     or os.getenv("RXN_LOCAL_INDEX_CHEMPILE_PARQUET")
     or os.getenv("RXN_LOCAL_INDEX_PISTACHIO_SMI")
 )
+_HAS_EXTERNAL_FRAGMENT_MATCH = bool(os.getenv("FRAGMENT_MATCH_API_URL"))
 _HAS_EXTERNAL_UNIMOL3_REACTION_FORWARD_PREDICT = bool(os.getenv("UNIMOL3_REACTION_FORWARD_PREDICT_API_URL"))
 _NETWORK_TESTS_ENABLED = bool(os.getenv("SPECTUNE_ENABLE_NETWORK_TESTS"))
 
@@ -166,6 +170,25 @@ def test_external_reaction_local_index_search_returns_candidates():
     print(result)
     assert result.completion in {"success", "partial"}, result.warnings
     assert result.status in {"ok", "no_candidates"}
+
+
+@pytest.mark.skipif(not _HAS_EXTERNAL_FRAGMENT_MATCH, reason="FRAGMENT_MATCH_API_URL is not set")
+def test_external_fragment_match_returns_recommended_candidate():
+    # FragmentMatchConfig() reads FRAGMENT_MATCH_API_URL from the environment.
+    tool = FragmentMatchTool(FragmentMatchConfig())
+
+    result = asyncio.run(
+        tool.execute(
+            {
+                "rerank": [{"rank": 1, "smiles": "COc1ccccc1"}, {"rank": 2, "smiles": "Oc1ccccc1"}],
+                "fragments": [{"format": "text", "value": "4-methoxyphenyl"}],
+            }
+        )
+    )
+    print(result)
+    assert result.completion == "success", result.warnings
+    assert result.status in {"ok", "fallback"}
+    assert result.data.get("recommended", {}).get("smiles")
 
 
 # @pytest.mark.skipif(not _NETWORK_TESTS_ENABLED, reason="SPECTUNE_ENABLE_NETWORK_TESTS is not set")

@@ -25,9 +25,12 @@ DEFAULT_RL_TOOL_NAMES: tuple[str, ...] = (
     "nmr_repair",
     "nmr_forward_predict",
     "nmr_rerank",
+    # "fragment_match",
     # "reaction_local_index_search",
     "code_interpreter",
+    "read_code_interpreter_guide",
     "web_search",
+    "read_web_search_guide",
 )
 
 

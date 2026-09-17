@@ -7,7 +7,7 @@ import pytest
 pd = pytest.importorskip("pandas")
 pytest.importorskip("pyarrow")
 
-from spectune.format.v1 import SYSTEM_PROMPT_THINK_RDKIT  # noqa: E402
+from spectune.format.v1 import SYSTEM_PROMPT_THINK  # noqa: E402
 from spectune.rollout.refine import (  # noqa: E402
     TrajectoryRefiner,
     build_parser,
@@ -106,7 +106,7 @@ def test_refiner_preserves_evidence_and_normalizes_system_prompt():
 
     refined = asyncio.run(refiner.refine(_source_messages()))
 
-    assert refined[0]["content"].startswith(SYSTEM_PROMPT_THINK_RDKIT.rstrip())
+    assert refined[0]["content"].startswith(SYSTEM_PROMPT_THINK.rstrip())
     assert "# Tools" in refined[0]["content"]
     assert refined[1]["content"] == "identify this spectrum"
     assert refined[3]["content"] == _tool_response()
@@ -124,7 +124,7 @@ def test_refiner_preserves_evidence_and_normalizes_system_prompt():
 
 def test_refiner_requires_tool_descriptions_when_trajectory_calls_tools():
     source = _source_messages()
-    source[0]["content"] = SYSTEM_PROMPT_THINK_RDKIT
+    source[0]["content"] = SYSTEM_PROMPT_THINK
     llm = FakeLlm(_response())
 
     with pytest.raises(ValueError, match="missing tool descriptions"):

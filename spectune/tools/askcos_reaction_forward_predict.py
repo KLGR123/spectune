@@ -27,10 +27,9 @@ _FORWARD_ENDPOINT = "/api/forward/controller/call-sync"
 class AskcosReactionForwardPredictTool(Tool):
     name = "askcos_reaction_forward_predict"
     description = (
-        "Predict likely reaction products from reactant SMILES via the external ASKCOS "
-        "forward-prediction model (MIT). Runs remotely (may be slow); predictions are references "
-        "worth cross-checking. Does not read NMR/MS spectra, so spectrum matching needs "
-        "a follow-up NMR tool."
+        "通过外部 ASKCOS 正向预测模型（MIT）根据反应物 SMILES 预测可能的反应产物。"
+        "远程运行（可能较慢）；预测结果是值得交叉核实的参考。不读取 NMR/MS 谱图，"
+        "谱图匹配需要后续调用 NMR 相关工具。"
     )
 
     def __init__(self, config: AskcosReactionForwardPredictConfig | None = None) -> None:
@@ -44,33 +43,33 @@ class AskcosReactionForwardPredictTool(Tool):
             "properties": {
                 "reaction_smiles": {
                     "type": "string",
-                    "description": "Optional reaction SMILES, 'reactants>>products' or 'reactants>agents>products'.",
+                    "description": "可选的反应 SMILES，格式为 'reactants>>products' 或 'reactants>agents>products'。",
                 },
-                "reactants": {"type": "array", "items": {"type": "string"}, "description": "Reactant SMILES."},
-                "reagents": {"type": "array", "items": {"type": "string"}, "description": "Optional reagent SMILES."},
-                "solvent": {"type": "array", "items": {"type": "string"}, "description": "Optional solvent SMILES."},
+                "reactants": {"type": "array", "items": {"type": "string"}, "description": "反应物 SMILES。"},
+                "reagents": {"type": "array", "items": {"type": "string"}, "description": "可选的试剂 SMILES。"},
+                "solvent": {"type": "array", "items": {"type": "string"}, "description": "可选的溶剂 SMILES。"},
                 "conditions": {
                     "type": "string",
-                    "description": "Free-text conditions; only kept as provenance unless reagents/solvent are set.",
+                    "description": "自由文本形式的反应条件；除非设置了 reagents/solvent，否则仅作为溯源信息保留。",
                 },
                 "reaction_type": {
                     "type": "string",
-                    "description": "Free-text reaction type hint, kept as provenance only (not sent to ASKCOS).",
+                    "description": "自由文本形式的反应类型提示，仅作为溯源信息保留（不会发送给 ASKCOS）。",
                 },
-                "target_formula": {"type": "string", "description": "Optional target product molecular formula."},
+                "target_formula": {"type": "string", "description": "可选的目标产物分子式。"},
                 "constraints": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Optional functional-group hints checked against predicted products.",
+                    "description": "可选的官能团提示，用于核对预测产物。",
                 },
                 "topk": {"type": "integer", "minimum": 1, "maximum": 100, "default": config.default_topk},
                 "api_backend": {
                     "type": "string",
                     "enum": sorted(_BACKENDS),
                     "default": config.default_api_backend,
-                    "description": "ASKCOS forward-prediction model backend.",
+                    "description": "ASKCOS 正向预测模型的后端。",
                 },
-                "model_name": {"type": "string", "description": "Optional remote model name, e.g. 'pistachio'."},
+                "model_name": {"type": "string", "description": "可选的远程模型名称，例如 'pistachio'。"},
             },
             "required": [],
             "additionalProperties": False,

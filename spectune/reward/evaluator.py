@@ -16,7 +16,8 @@ from spectune.format.v1 import final_answer_region
 from spectune.format.v1 import messages_from_decoded_hermes
 
 from .base import JsonDict, RewardResult
-from .config import COMPONENT_KEYS, RewardConfig
+from .config import RewardConfig
+from .skeleton_match import get_skeleton_key
 
 _TOOL_CALL_RE = re.compile(
     rf"{re.escape(TOOL_CALL_START)}\s*(.*?)\s*{re.escape(TOOL_CALL_END)}",
@@ -27,6 +28,8 @@ _TOOL_RESPONSE_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 _NMR_GENERATE_TOOL_NAME = "nmr_generate"
+_CODE_INTERPRETER_TOOL_NAME = "code_interpreter"
+_PRINT_CALL_RE = re.compile(r"\bprint\s*\(")
 _SMILES_TAG_RE = re.compile(r"<smiles>\s*(.*?)\s*</smiles>", re.DOTALL | re.IGNORECASE)
 _ANSWER_KEYS = ("candidates", "smiles_list", "answers", "answer", "smiles", "canonical_smiles")
 _SMILES_TOKEN_RE = re.compile(r"^[A-Za-z0-9@+\-\[\]()=#$\\/%.:*]+$")
@@ -112,6 +115,17 @@ class RewardEvaluator:
             except ValueError:
                 pass
 
+        # Fallback lenient match (stereochemistry-tolerant), only consulted
+        # when the exact match above missed entirely.
+        loose_rank: int | None = None
+        if gt_smiles and gt_rank is None:
+            gt_skeleton_key = get_skeleton_key(gt_smiles)
+            if gt_skeleton_key:
+                for index, candidate in enumerate(valid_candidates):
+                    if get_skeleton_key(candidate) == gt_skeleton_key:
+                        loose_rank = index + 1
+                        break
+
         config = self.config
         if not gt_smiles:
             # Empty gt means the correct answer is an empty candidate list.
@@ -121,6 +135,9 @@ class RewardEvaluator:
             gt_reward = config.gt_match_reward if (explicit_empty and not raw_candidates) else 0.0
         else:
             gt_reward = config.gt_match_reward * config.rank_discount ** (gt_rank - 1) if gt_rank is not None else 0.0
+        loose_match_bonus = (
+            config.gt_loose_match_reward * config.rank_discount ** (loose_rank - 1) if loose_rank is not None else 0.0
+        )
         tool_format_reward = config.invalid_tool_call_penalty * invalid_call_count
         smiles_validity_reward = config.invalid_smiles_penalty if invalid_candidates else 0.0
         tool_call_count = len(calls) + len(malformed_calls)
@@ -133,8 +150,6 @@ class RewardEvaluator:
             "smiles_validity": float(smiles_validity_reward),
             "tool_call_count": float(tool_count_reward),
         }
-        weights = config.component_weights
-        weighted_components = {key: float(weights[key] * components[key]) for key in COMPONENT_KEYS}
 
         called_nmr_generate, nmr_generate_first_results = _nmr_generate_calls_and_first_results(messages)
         first_answer_candidate = valid_candidates[0] if valid_candidates else None
@@ -147,6 +162,14 @@ class RewardEvaluator:
         )
         nmr_diversity_bonus = config.nmr_diversity_bonus if nmr_diversity_bonus_applied else 0.0
 
+        code_interpreter_calls = _code_interpreter_call_stats(messages)
+        code_interpreter_missing_print_count = sum(1 for call in code_interpreter_calls if not call["has_print"])
+        code_interpreter_error_count = sum(1 for call in code_interpreter_calls if call["status"] == "error")
+        code_interpreter_missing_print_penalty = (
+            config.code_interpreter_missing_print_penalty * code_interpreter_missing_print_count
+        )
+        code_interpreter_error_penalty = config.code_interpreter_error_penalty * code_interpreter_error_count
+
         warnings: list[str] = []
         if not rdkit_available:
             warnings.append("rdkit is unavailable; SMILES were compared as opaque strings and validity was not checked")
@@ -155,21 +178,40 @@ class RewardEvaluator:
 
         if os.getenv("VERL_DEBUG"):
             print("\n[DEBUG] === reward calculation ===")
-            print(f"[DEBUG] ground_truth_smiles = {gt_smiles!r}, gt_rank = {gt_rank}")
+            print(f"[DEBUG] ground_truth_smiles = {gt_smiles!r}, gt_rank = {gt_rank}, loose_rank = {loose_rank}")
             print(f"[DEBUG] answer_candidates = {raw_candidates}")
             print(f"[DEBUG] valid_candidates = {valid_candidates}")
             print(f"[DEBUG] invalid_tool_calls = {invalid_call_errors}")
             print(f"[DEBUG] components = {components}")
-            print(f"[DEBUG] weighted_components = {weighted_components}")
             print(f"[DEBUG] nmr_diversity_bonus = {nmr_diversity_bonus}")
-            print(f"[DEBUG] total_score = {sum(weighted_components.values()) + nmr_diversity_bonus:.4f}")
+            print(f"[DEBUG] gt_loose_match_bonus = {loose_match_bonus} (loose_rank = {loose_rank})")
+            print(
+                f"[DEBUG] code_interpreter_missing_print_penalty = {code_interpreter_missing_print_penalty} "
+                f"({code_interpreter_missing_print_count} calls)"
+            )
+            print(
+                f"[DEBUG] code_interpreter_error_penalty = {code_interpreter_error_penalty} "
+                f"({code_interpreter_error_count} calls)"
+            )
+            print(
+                "[DEBUG] total_score = "
+                f"{sum(components.values()) + nmr_diversity_bonus + loose_match_bonus + code_interpreter_missing_print_penalty + code_interpreter_error_penalty:.4f}"
+            )
             breakpoint()
 
         return RewardResult(
-            score=float(sum(weighted_components.values()) + nmr_diversity_bonus),
+            score=float(
+                sum(components.values())
+                + nmr_diversity_bonus
+                + loose_match_bonus
+                + code_interpreter_missing_print_penalty
+                + code_interpreter_error_penalty
+            ),
             components=components,
             details={
                 "gt_rank": gt_rank,
+                "gt_loose_rank": loose_rank,
+                "gt_loose_match_bonus": float(loose_match_bonus),
                 "ground_truth_smiles": gt_smiles or None,
                 "answer_candidates": raw_candidates,
                 "canonical_candidates": valid_candidates,
@@ -178,12 +220,16 @@ class RewardEvaluator:
                 "excess_tool_calls": excess_calls,
                 "invalid_tool_call_count": invalid_call_count,
                 "invalid_tool_calls": invalid_call_errors,
-                "component_weights": dict(weights),
-                "weighted_components": weighted_components,
+                "components": dict(components),
                 "called_nmr_generate": called_nmr_generate,
                 "nmr_generate_first_results": nmr_generate_first_results,
                 "nmr_diversity_bonus_applied": nmr_diversity_bonus_applied,
                 "nmr_diversity_bonus": float(nmr_diversity_bonus),
+                "code_interpreter_call_count": len(code_interpreter_calls),
+                "code_interpreter_missing_print_count": code_interpreter_missing_print_count,
+                "code_interpreter_error_count": code_interpreter_error_count,
+                "code_interpreter_missing_print_penalty": float(code_interpreter_missing_print_penalty),
+                "code_interpreter_error_penalty": float(code_interpreter_error_penalty),
                 "strict_answer_format": config.strict_answer_format,
             },
             warnings=warnings,
@@ -276,22 +322,28 @@ def _collect_tool_calls(messages: Sequence[Mapping[str, Any]]) -> tuple[list[Jso
     return calls, errors
 
 
-def _assistant_tool_call_names(message: Mapping[str, Any]) -> list[str]:
-    """Names of the tool calls issued by one assistant message, in call order."""
+def _assistant_tool_calls(message: Mapping[str, Any]) -> list[tuple[str, Any]]:
+    """``(name, arguments)`` pairs for one assistant message's tool calls, in call order."""
     structured = message.get("tool_calls")
     if isinstance(structured, Sequence) and not isinstance(structured, str | bytes):
-        names: list[str] = []
+        calls: list[tuple[str, Any]] = []
         for value in structured:
             mapping = _as_mapping(value)
             if mapping is None:
                 continue
             function = mapping.get("function") if isinstance(mapping.get("function"), Mapping) else mapping
             name = function.get("name") if isinstance(function, Mapping) else None
+            arguments = function.get("arguments") if isinstance(function, Mapping) else None
             if isinstance(name, str) and name.strip():
-                names.append(name.strip())
-        return names
+                calls.append((name.strip(), arguments))
+        return calls
     # Hermes-tag content: reuse the shared v1 parser instead of redefining it.
-    return [call["name"] for call in extract_v1_tool_calls(_content_text(message.get("content")))]
+    return [(call["name"], call.get("arguments")) for call in extract_v1_tool_calls(_content_text(message.get("content")))]
+
+
+def _assistant_tool_call_names(message: Mapping[str, Any]) -> list[str]:
+    """Names of the tool calls issued by one assistant message, in call order."""
+    return [name for name, _ in _assistant_tool_calls(message)]
 
 
 def _parse_tool_response_payload(content: str) -> JsonDict | None:
@@ -367,6 +419,54 @@ def _nmr_generate_first_candidate(payload: Mapping[str, Any]) -> str | None:
         canonical, _ = _canonicalize_smiles(value.strip())
         return canonical or value.strip()
     return None
+
+
+def _code_has_print(arguments: Any) -> bool:
+    """Whether a ``code_interpreter`` call's ``code`` argument invokes ``print(...)``.
+
+    A call whose code never prints leaves stdout empty even on success, so the
+    model gets no usable feedback from the tool response.
+    """
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            return False
+    if not isinstance(arguments, Mapping):
+        return False
+    code = arguments.get("code")
+    return isinstance(code, str) and bool(_PRINT_CALL_RE.search(code))
+
+
+def _code_interpreter_call_stats(messages: Sequence[Mapping[str, Any]]) -> list[JsonDict]:
+    """Return ``{"has_print": bool, "status": str | None}`` for every ``code_interpreter`` call.
+
+    Each call is matched to its tool response by call order -- the same
+    pending-queue approach as :func:`_nmr_generate_calls_and_first_results` --
+    so calls that never receive a response (e.g. the trajectory was cut off)
+    simply keep ``status=None`` and are not charged the error penalty.
+    """
+    stats: list[JsonDict] = []
+    pending: list[JsonDict | None] = []
+    for message in messages:
+        role = message.get("role")
+        if role == "assistant":
+            for name, arguments in _assistant_tool_calls(message):
+                if name == _CODE_INTERPRETER_TOOL_NAME:
+                    entry: JsonDict = {"has_print": _code_has_print(arguments), "status": None}
+                    stats.append(entry)
+                    pending.append(entry)
+                else:
+                    pending.append(None)
+            continue
+        if role in ("tool", "user") and pending:
+            entry = pending.pop(0)
+            if entry is None:
+                continue
+            payload = _parse_tool_response_payload(_content_text(message.get("content")))
+            if payload is not None:
+                entry["status"] = payload.get("status")
+    return stats
 
 
 def _schema_map(schemas: Sequence[Mapping[str, Any]]) -> dict[str, JsonDict]:

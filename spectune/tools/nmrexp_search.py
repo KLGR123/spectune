@@ -14,9 +14,9 @@ from .utils import as_list, canonical_smiles, molecular_formula, post_json, spec
 class NmrExpSearchTool(Tool):
     name = "nmrexp_search"
     description = (
-        "Search for structures consistent with 1H/13C NMR evidence via an external "
-        "experimental-NMR search backend (iterative mutate/filter/pool, not a generative model). "
-        "The database search runs remotely and can be slow; candidates are references to verify, not answers."
+        "通过外部实验 NMR 搜索后端（迭代式变异/过滤/候选池，而非生成式模型），"
+        "搜索与 1H/13C NMR 证据一致的结构。数据库搜索在远程执行，可能较慢；"
+        "返回的候选是待核实的参考，而非最终答案。"
     )
 
     def __init__(self, config: NmrExpSearchConfig | None = None) -> None:
@@ -30,12 +30,12 @@ class NmrExpSearchTool(Tool):
             "properties": {
                 "h_nmr_peaks": {"type": "array", "items": {"type": "object"}},
                 "c_nmr_peaks": {"type": "array", "items": {"type": "object"}},
-                "h_shifts": {"type": "array", "items": {"type": "number"}, "description": "Raw 1H shifts (ppm)."},
-                "c_shifts": {"type": "array", "items": {"type": "number"}, "description": "Raw 13C shifts (ppm)."},
+                "h_shifts": {"type": "array", "items": {"type": "number"}, "description": "原始 1H 化学位移（ppm）。"},
+                "c_shifts": {"type": "array", "items": {"type": "number"}, "description": "原始 13C 化学位移（ppm）。"},
                 "h_split": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Multiplicities aligned with h_shifts.",
+                    "description": "与 h_shifts 一一对应的多重性。",
                 },
                 "num_search": {"type": "integer", "minimum": 1, "default": config.default_num_search},
                 "topk": {"type": "integer", "minimum": 1, "default": config.default_topk},
@@ -44,7 +44,7 @@ class NmrExpSearchTool(Tool):
                     "items": {"type": "string"},
                     "default": list(config.default_allowed_elements),
                 },
-                "name": {"type": "string", "description": "Optional identifier attached to the search request."},
+                "name": {"type": "string", "description": "附加在搜索请求上的可选标识符。"},
                 "sigma_h": {"type": "number", "default": config.default_sigma_h},
                 "sigma_c": {"type": "number", "default": config.default_sigma_c},
                 "use_h_split": {"type": "boolean", "default": config.default_use_h_split},
@@ -65,7 +65,7 @@ class NmrExpSearchTool(Tool):
                     "type": "array",
                     "items": {"type": "string"},
                     "default": list(config.default_invalid_patterns),
-                    "description": "SMARTS patterns excluded from generated structures.",
+                    "description": "在生成结构中被排除的 SMARTS 模式。",
                 },
                 "include_active_hs": {"type": "string", "default": config.default_include_active_hs},
             },

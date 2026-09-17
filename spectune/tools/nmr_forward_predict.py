@@ -14,15 +14,13 @@ from .utils import post_json
 class NmrForwardPredictTool(Tool):
     name = "nmr_forward_predict"
     description = (
-        "Predict atom-level 1H/13C NMR shifts for a candidate SMILES via an external NMR "
-        "prediction model. The model runs remotely (may be slow); predictions are approximate "
-        "references worth cross-checking."
+        "通过外部 NMR 预测模型，为候选 SMILES 预测原子级别的 1H/13C NMR 化学位移。"
     )
     parameters: JsonDict = {
         "type": "object",
         "properties": {
-            "smiles": {"type": "string", "description": "Candidate SMILES to predict."},
-            "solvent": {"type": "string", "description": "NMR solvent (e.g. CDCl3, DMSO-d6)."},
+            "smiles": {"type": "string", "description": "待预测的候选 SMILES"},
+            "solvent": {"type": "string", "description": "NMR 溶剂（如 CDCl3、DMSO-d6）"},
         },
         "required": ["smiles"],
         "additionalProperties": False,

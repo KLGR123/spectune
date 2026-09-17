@@ -41,3 +41,5 @@ outputs/
 
 # cache
 cache/
+
+.claude/

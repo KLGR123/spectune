@@ -67,6 +67,22 @@ class RolloutRecord:
         return d
 
 
+def _is_correct_empty_answer(details: JsonDict) -> bool:
+    """True when the ground truth is empty and the model correctly abstained.
+
+    ``RewardEvaluator`` has no notion of ``gt_rank`` when the ground truth
+    SMILES is empty (there is nothing to rank): it instead rewards an
+    explicit ``{"smiles": []}`` answer directly via the ``gt_smiles``
+    component. Treat that case as an immediate hit -- the model got the
+    empty answer right on its first (and only) guess -- so it isn't silently
+    scored as a miss by the rank-based logic below.
+    """
+    if details.get("ground_truth_smiles") is not None:
+        return False
+    components = details.get("components")
+    return isinstance(components, dict) and components.get("gt_smiles", 0) > 0
+
+
 def compute_hit_at_k_metrics(
     records: list[RolloutRecord],
     *,
@@ -86,7 +102,12 @@ def compute_hit_at_k_metrics(
     for record in records:
         details = record.reward_details
         rank = details.get("gt_rank")
-        ranks.append(rank if isinstance(rank, int) and rank > 0 else None)
+        if isinstance(rank, int) and rank > 0:
+            ranks.append(rank)
+        elif _is_correct_empty_answer(details):
+            ranks.append(1)
+        else:
+            ranks.append(None)
         candidates = details.get("canonical_candidates")
         if isinstance(candidates, list):
             max_candidates = max(max_candidates, len(candidates))

@@ -10,7 +10,7 @@ Spectune owns data norms, sample construction, tools, and rewards; external trai
 cd spectune
 pip install -e .                              # core package only
 pip install -e ".[dev]"                       # + pytest, ruff
-pip install -e ".[dev,chem,mcp,reaction]"     # + rdkit, fastmcp (nmr_forward_predict), pandas (chempile parquet)
+pip install -e ".[dev,chem,mcp,reaction]"     # + rdkit, fastmcp (nmr_forward_predict), pandas/pyarrow (chempile + prebuilt reaction index parquet)
 pip install -e ".[dev,data]"                  # + pandas/pyarrow (dataloader parquet/CSV reads)
 pip install -e ".[dev,data,classifier]"       # + sklearn/RDKit/transformers/torch/matplotlib (clustering)
 ```
@@ -27,6 +27,10 @@ export NMR_REPAIR_API_URL=<url>             # nmr_repair
 export NMR_RANK_API_URL=<url>               # nmr_rerank
 export NMR_PREDICT_API_URL=<url>            # nmr_forward_predict (needs `pip install spectune[mcp]`)
 export NMREXP_SEARCH_MCP_BASE_URL=<url>     # nmrexp_search
+export RXN_LOCAL_INDEX_USPTO_CSV=<path>       # reaction_local_index_search (at least one path; needs `pip install spectune[chem]`)
+export RXN_LOCAL_INDEX_CHEMPILE_PARQUET=<path> # reaction_local_index_search (needs `pip install spectune[reaction]` for pandas)
+export RXN_LOCAL_INDEX_PISTACHIO_SMI=<path>   # reaction_local_index_search
+export RXN_LOCAL_INDEX_PREBUILT_DIR=<path>    # reaction_local_index_search (optional; see "Build a prebuilt reaction index" below)
 
 # Tool result cache (optional, enabled by default)
 export SPECTUNE_TOOL_CACHE_DIR=/path/to/spectune/cache   # default: <repo>/cache
@@ -205,7 +209,7 @@ python -m spectune.artifacts compile \
   --split train \
   --manifest outputs/datasets/verl/train.manifest.json \
   --interaction-config outputs/datasets/verl/interaction_config.yaml \
-  --tools nmr_generate nmr_rerank nmr_repair nmr_forward_predict code_interpreter web_search \
+  --tools nmr_generate nmr_rerank nmr_repair nmr_forward_predict reaction_local_index_search code_interpreter web_search fragment_match \
   --prompt think_rdkit
 
 python -m spectune.artifacts compile \
@@ -274,6 +278,50 @@ rollout.
 `SpectuneTool` loads **full** schemas from `ToolManager` (it does not use verl's
 pydantic schema models, which would drop `items` / `minimum` / …). Keep YAML
 entries schema-free (`tool_name` only).
+
+## Build a prebuilt reaction index
+
+`reaction_local_index_search` can either parse its raw sources on every cold
+start (slow: tens of seconds per source, and capped at 50,000 records for
+ChemPile/Pistachio) or load a prebuilt, already-RDKit-canonicalized Parquet
+index (fast, no cap). Building the index is a one-time, explicit, offline
+step -- it does not run automatically, so a training worker never pays for it
+unexpectedly:
+
+```bash
+cd /path/to/spectune
+source secrets.env   # reads RXN_LOCAL_INDEX_USPTO_CSV / _CHEMPILE_PARQUET / _PISTACHIO_SMI
+
+python -m spectune.tools build-reaction-index \
+    --output-dir outputs/reaction_index \
+    --sources uspto chempile pistachio \
+    --workers 16
+
+# then point every worker at the built index
+export RXN_LOCAL_INDEX_PREBUILT_DIR=outputs/reaction_index
+```
+
+Key flags:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--output-dir` | required | Directory to write `{source}.parquet` into |
+| `--sources` | all three | Subset of `uspto chempile pistachio` to build |
+| `--workers` | `min(16, cpu_count)` | Parallel RDKit canonicalization workers |
+| `--max-records` | `0` (unlimited) | Cap records read per source (safety valve; full corpus by default) |
+| `--uspto-csv` | `$RXN_LOCAL_INDEX_USPTO_CSV` | Override the raw USPTO CSV path for this build |
+| `--chempile-parquet` | `$RXN_LOCAL_INDEX_CHEMPILE_PARQUET` | Override the raw ChemPile parquet path for this build |
+| `--pistachio-smi` | `$RXN_LOCAL_INDEX_PISTACHIO_SMI` | Override the raw Pistachio `.smi` path for this build |
+
+A source with no configured raw path is skipped (reported as `status:
+skipped`), not an error. Building the full ~15.7M-line Pistachio corpus takes
+on the order of 30-60 minutes single-threaded (`--workers 1`); `--workers`
+parallelizes the RDKit canonicalization step, the only real bottleneck, across
+processes and cuts that roughly linearly. `RXN_LOCAL_INDEX_PREBUILT_DIR` must
+be set (env var or `ReactionLocalIndexSearchConfig.prebuilt_index_dir`) for
+`reaction_local_index_search` to actually use the built index; a source
+missing its prebuilt file falls back to the slow raw-parsing path with a
+warning instead of failing.
 
 ## SFT with Rollout-Filtered Data
 
@@ -608,16 +656,17 @@ cd /path/to/spectune
 
 python -m spectune.rollout.eval \
     --input        outputs/datasets/verl/test.parquet \
-    --output       outputs/trajectories/eval/test-20260831.jsonl \
+    --output       outputs/trajectories/eval/ood_grpo_all_qwen3_32b_wo_sft_w_rdkit_prompt_w_exp_reward_step_650.jsonl \
     --backend      local \
-    --model        outputs/checkpoints/spectune/sft-all-rollout-qwen3-8b/global_step_216/huggingface \
+    --model        /fs_mol/liujiarun/spectune/outputs/checkpoints/rl/grpo-all-qwen3-32b-wo-sft-w-rdkit-prompt-w-exp-reward/global_step_650/actor/huggingface \
     --tensor-parallel-size 8 \
     --max-model-len 16384 \
     --max-tokens   8192 \
-    --temperature  0.6 \
+    --temperature  0.5 \
     --top-p        0.95 \
-    --nmr-gen-topk 10 \
-    --max-concurrency 8
+    --nmr-gen-topk 15 \
+    --max-concurrency 4 \
+    --gpu-memory-utilization 0.65
 ```
 
 ```bash
@@ -635,6 +684,42 @@ python -m spectune.rollout.eval \
 Progress is checkpointed to `<output>.checkpoint.jsonl` the same way as
 `python -m spectune.rollout` (pass `--no-checkpoint` to disable). Pass
 `--no-hit-at-k` to skip the metrics report and only write the output file.
+
+## Interactive Web Demo
+
+`python -m spectune.rollout.webui` shares the same `--backend`/`--model`
+dispatch as `python -m spectune.rollout.eval` (`local` auto-starts a vLLM
+server for a merged checkpoint, `litellm`/`http` talk to a hosted or
+already-running endpoint), but instead of scoring a batch it starts a small
+Flask server: type a query in the browser and watch the agent think, call
+tools, and answer in real time, one turn/tool-call/tool-response at a time
+(see [`spectune/rollout/interactive.py`](spectune/rollout/interactive.py)).
+The transcript uses the same segment coloring (think = purple, tool call =
+red, tool response = blue) as the trajectory viewers above, so live and
+offline views look alike. Install the extra with `pip install spectune[webui]`
+(just adds `flask`).
+
+```bash
+cd /path/to/spectune
+
+python -m spectune.rollout.webui \
+    --backend      local \
+    --model        spectune/outputs/checkpoints/rl/.../global_step_650/actor/huggingface \
+    --tensor-parallel-size 8 \
+    --max-model-len 16384 \
+    --max-tokens   8192 \
+    --temperature  0.5 \
+    --top-p        0.95 \
+    --nmr-gen-topk 15 \
+    --port         7865
+```
+
+Open `http://localhost:7865`. Each browser tab keeps its own conversation
+(stored in-process, keyed by a client-generated id in `localStorage`) so
+follow-up questions continue the same multi-turn agent loop; click
+"New conversation" to start over. The server processes one query at a time
+(a single lock guards the shared `LlmClient`/`ToolManager`), so it's meant
+for interactive debugging rather than concurrent multi-user load.
 
 
 ## Training Related

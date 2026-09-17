@@ -11,15 +11,13 @@ from typing import Any
 
 from .base import JsonDict, Tool, ToolResult
 from .config import WebSearchConfig
+from .help import HelpTool
 
 
 class WebSearchTool(Tool):
     name = "web_search"
     description = (
-        "Search the open web for reference information, e.g. a molecule's names, "
-        "SMILES/SMARTS, properties, or related literature. Hits come from an external "
-        "search API (may be slow) and are a useful reference to cross-check; it does not "
-        "infer structures or final answers."
+        "搜索参考信息，如分子名称、SMILES、SMARTS、性质，相关文献。"
     )
 
     def __init__(self, config: WebSearchConfig | None = None) -> None:
@@ -33,7 +31,7 @@ class WebSearchTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Search query."},
+                "query": {"type": "string", "description": "查询内容"},
                 "search_type": {"type": "string", "default": config.default_search_type},
                 "count": {"type": "integer", "minimum": 1, "default": config.default_count},
                 "need_content": {"type": "boolean", "default": config.default_need_content},
@@ -133,6 +131,31 @@ class WebSearchTool(Tool):
                 if line and line != "[DONE]":
                     events.append(line)
             return events
+
+
+WEB_SEARCH_GUIDE = """# web_search 工具使用说明
+
+调用外部通用网页搜索引擎，用于查找超出自身训练知识、或需要外部核实的参考信息。它不是化学结构数据库，也不是波谱数据库。
+
+## 适用场景
+
+- 具名反应的一般机理与典型条件查询，例如常用催化剂、碱、溶剂、温度等背景信息。这类查询命中率高，返回内容通常真实可用。例如 Suzuki coupling arylboronic acid Pd(PPh3)4 K2CO3 typical conditions temperature solvent 或 reductive amination aldehyde secondary amine NaBH(OAc)3 DCE conditions；
+- 特定、已被文献报道的环化或官能团转化机理查询，用词需具体，包含反应物类别和转化类型。例如 2-amino-5-methylbenzenethiol and 4-bromophenyl isothiocyanate reaction mechanism；
+- 常见化合物名称到基本背景资料的一般性查询（非核心结构确认用途）。
+
+## 不适用场景
+
+不要用于通过 NMR 化学位移数值反查结构、把反应物 SMILES 拼进查询文本，或直接搜索已拥有的 SMILES 本身。查询应尽量使用能被搜索引擎理解为自然语言的表达，例如反应类型、官能团描述、化合物通用名，而不是数值型或结构化标识符。
+"""
+
+
+class WebSearchGuideTool(HelpTool):
+    name = "read_web_search_guide"
+    description = (
+        "查阅 web_search 工具的使用说明，哪些查询方式更有效。"
+        "当不确定 web_search 能否帮上忙，或某次结果不对时可确认。无需参数。"
+    )
+    guide = WEB_SEARCH_GUIDE
 
 
 def _walk_mappings(value: Any) -> Iterable[Mapping[str, Any]]:

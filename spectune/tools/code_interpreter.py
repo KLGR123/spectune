@@ -17,6 +17,7 @@ from typing import Any
 
 from .base import JsonDict, Tool, ToolResult
 from .config import CodeInterpreterConfig
+from .help import HelpTool
 from .utils import extract_last_json
 
 
@@ -49,17 +50,14 @@ def _strip_markdown_fence(code: str) -> str:
 class CodeInterpreterTool(Tool):
     name = "code_interpreter"
     description = (
-        "Run Python in a sandbox for deterministic computation and data processing, e.g. "
-        "RDKit-based structure/formula verification, or filtering, sorting, and deduplicating "
-        "candidates. Unlike the model- and search-based tools, its output is exact and "
-        "reliable, limited only by the code you supply."
+        "代码运行工具，用于计算、数据处理、使用 RDKit 等等。"
     )
     parameters: JsonDict = {
         "type": "object",
         "properties": {
-            "code": {"type": "string", "description": "Python code to execute."},
-            "stdin": {"type": "string", "description": "Optional standard input."},
-            "timeout": {"type": "integer", "minimum": 1, "description": "Execution timeout in seconds."},
+            "code": {"type": "string", "description": "要执行的代码"},
+            "stdin": {"type": "string", "description": "（可选）标准输入"},
+            # "timeout": {"type": "integer", "minimum": 1, "description": "超时（秒）"},
             "language": {"type": "string", "default": "python"},
         },
         "required": ["code"],
@@ -205,3 +203,59 @@ class CodeInterpreterTool(Tool):
         if not limit or len(value) <= limit:
             return value
         return value[:limit] + "\n[spectune output truncated]\n"
+
+
+CODE_INTERPRETER_GUIDE = """# code_interpreter 工具使用说明
+
+可以自由组合、扩展、多次调用，一次写更长、更复杂的代码来完成完整分析和处理，不必局限于逐个调用 API。
+变量必须用 print，不 print 就拿不到任何输出，包括中间过程检查也需 print。
+如下是有关 RDKit 的一些常用 API 及探索方法，供参考。
+
+## 如何查有哪些 API
+
+不确定名字时先探索，不要凭印象猜。
+
+```
+import pkgutil
+import rdkit.Chem
+submodules = sorted(name for _, name, _ in pkgutil.iter_modules(rdkit.Chem.__path__))
+print("num submodules:", len(submodules))
+print(submodules[:20])
+
+from rdkit.Chem import rdMolDescriptors
+api_names = sorted(n for n in dir(rdMolDescriptors) if not n.startswith("_"))
+print("rdMolDescriptors api count:", len(api_names))
+print([n for n in api_names if "Formula" in n or "Mol" in n][:20])
+print(rdMolDescriptors.CalcMolFormula.__doc__)
+print("has CalcMolFormula:", hasattr(rdMolDescriptors, "CalcMolFormula"))
+```
+
+## 常用 API 一览
+
+按需 import 后调用，签名、用法不确定时用上面的方法查。
+
+- `rdkit.Chem.MolFromSmiles` / `MolToSmiles` / `MolFromSmarts`：SMILES/SMARTS 与 Mol 对象互转
+- `rdkit.Chem.Descriptors.MolWt` / `ExactMolWt`：分子量 / 精确质量
+- `rdkit.Chem.Descriptors.CalcMolDescriptors`：批量计算全部描述符（TPSA、MolLogP、NumHDonors、NumHAcceptors、NumRotatableBonds、NumAromaticRings 等，返回 dict）
+- `rdkit.Chem.rdMolDescriptors.CalcMolFormula`：分子式
+- `rdkit.Chem.rdMolDescriptors.CalcNumAromaticRings`：芳香环数
+- `mol.GetAtoms()` / `atom.GetIdx()` / `GetSymbol()` / `GetTotalNumHs()` / `IsInRing()`：遍历原子
+- `mol.GetBonds()` / `bond.GetBeginAtomIdx()` / `GetEndAtomIdx()` / `GetBondType()` / `GetBondTypeAsDouble()`：遍历键
+- `mol.GetRingInfo()` / `ring_info.NumRings()` / `AtomRings()`：环信息
+- DBE/不饱和度无现成 API，需按分子式 (C, H, N, 卤素) 手算：`C - H/2 - X/2 + N/2 + 1`
+- `rdkit.Chem.Fragments.fr_*`：官能团计数（如 `fr_ester`、`fr_ketone`、`fr_amide`、`fr_phenol`、`fr_Ar_OH`、`fr_methoxy`、`fr_nitro`、`fr_halogen`、`fr_benzene`，完整列表用上面的探索方法查 `dir(Fragments)`）
+- `mol.HasSubstructMatch` / `GetSubstructMatches`：配合 `MolFromSmarts` 做自定义子结构匹配
+- `rdkit.Chem.AllChem.GetMorganFingerprintAsBitVect`：指纹
+- `rdkit.DataStructs.TanimotoSimilarity`：指纹相似度
+- 去重：对 SMILES 先 `MolFromSmiles` 再 `MolToSmiles` 取标准化形式后放入 set
+- `rdkit.Chem.MolStandardize.rdMolStandardize.Normalizer().normalize` / `FragmentParent` / `StandardizeSmiles`：标准化、脱盐、互变异构体归一化
+"""
+
+
+class CodeInterpreterGuideTool(HelpTool):
+    name = "read_code_interpreter_guide"
+    description = (
+        "查阅 code_interpreter 工具的 RDKit 用法示例。"
+        "可选调用，写代码前不确定用哪个 API 时可以先查一下。无需参数。"
+    )
+    guide = CODE_INTERPRETER_GUIDE

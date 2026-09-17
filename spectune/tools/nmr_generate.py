@@ -14,9 +14,8 @@ from .utils import canonical_smiles, infer_nmr_type, molecular_formula, post_jso
 class NmrGenerateTool(Tool):
     name = "nmr_generate"
     description = (
-        "Generate candidate structures from NMR peaks (1H/13C shifts), optionally constrained "
-        "by a target molecular formula, via an external generative model. Runs remotely; "
-        "candidates are suggestions to verify, not final answers."
+        "通过外部生成式模型，根据 NMR 谱峰（1H/13C 化学位移）生成候选结构，"
+        "可选以目标分子式作约束。"
     )
 
     def __init__(self, config: NmrGenerateConfig | None = None) -> None:
@@ -28,33 +27,30 @@ class NmrGenerateTool(Tool):
             "type": "object",
             "properties": {
                 "topk": {"type": "integer", "minimum": 1, "default": self.config.default_topk},
-                "beam_size": {"type": "integer", "minimum": 1, "description": "Generation beam size; defaults to topk."},
-                "batch_size": {"type": "integer", "minimum": 1, "description": "Inference batch size; defaults to 64."},
-                # nmr_type is inferred automatically from which peak arrays are present — not a caller parameter
-                "formula": {"type": "string", "description": "Target molecular formula."},
-                "molecular_formula": {"type": "string", "description": "Alias for formula."},
+                # "beam_size": {"type": "integer", "minimum": 1, "description": "生成 beam size；默认等于 topk"},
+                # "batch_size": {"type": "integer", "minimum": 1, "description": "推理 batch size；默认 64"},
+                "formula": {"type": "string", "description": "目标分子式"},
+                # "molecular_formula": {"type": "string", "description": "formula 别名"},
                 "h_nmr_peaks": {
                     "type": "array",
                     "items": {"type": "object"},
                     "description": (
-                        "List of 1H peak objects as produced by parse_nmr_text. Each object "
-                        "contains: 'centroid' (float, ppm, midpoint of the peak range), "
-                        "'delta' (float, same value), 'nH' (int, number of protons), "
-                        "'category' (str, canonical multiplicity code, e.g. 's','d','t','q','m',"
-                        "'dd','td','dq','brs'), 'j_values' (str, J coupling constants in Hz "
-                        "joined by '_', e.g. '8.0_4.0'), and optionally 'rangeMax'/'rangeMin' "
-                        "(floats, ppm) when the peak spans a range. "
-                        "Do NOT split a range peak into two separate centroids."
+                        "1H 谱峰对象列表，每个对象包含 "
+                        "'centroid'（float，ppm，峰范围的中点）、"
+                        "'delta'（float，与 centroid 相同的值）、'nH'（int，质子数）、"
+                        "'category'（str，标准化的多重性代码，如 's'、'd'、't'、'q'、'm'、"
+                        "'dd'、'td'、'dq'、'brs'）、'j_values'（str，以 '_' 连接的 J 耦合常数，"
+                        "单位 Hz，如 '8.0_4.0'），以及当峰跨越一个范围时可选的 'rangeMax'/'rangeMin'"
+                        "（float，ppm）；不要把一个范围峰拆成两个独立的 centroid"
                     ),
                 },
                 "c_nmr_peaks": {
                     "type": "array",
                     "items": {"type": "object"},
                     "description": (
-                        "List of 13C peak objects as produced by parse_nmr_text. Each object "
-                        "contains 'delta (ppm)' (float, ppm — note the key name includes the "
-                        "unit in parentheses, exactly as output by the parser). "
-                        "'delta' or 'centroid' are also accepted as fallback key names."
+                        "13C 谱峰对象列表，每个对象包含 "
+                        "'delta (ppm)'（float，ppm 注意键名中括号内包含单位，"
+                        "与解析器输出保持一致）；也接受 'delta' 或 'centroid' 作为备选键名"
                     ),
                 },
                 # h_shifts / c_shifts / h_split: legacy flat-array form; not used in the primary API path

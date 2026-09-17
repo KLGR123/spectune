@@ -17,9 +17,9 @@ from .config import SemanticScholarSearchConfig
 class SemanticScholarSearchTool(Tool):
     name = "semantic_scholar_search"
     description = (
-        "Search academic papers via the external Semantic Scholar API, returning metadata "
-        "(title, year, venue, authors, abstract); no full text. The remote call may be slow; "
-        "a reliable metadata reference, though coverage can be incomplete."
+        "通过 Semantic Scholar 外部 API 搜索学术论文，返回元数据"
+        "（标题、年份、期刊/会议、作者、摘要）；不含全文。远程调用可能较慢；"
+        "元数据可信度较高，但覆盖范围可能不完整。"
     )
 
     def __init__(self, config: SemanticScholarSearchConfig | None = None) -> None:
@@ -30,7 +30,7 @@ class SemanticScholarSearchTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Search query."},
+                "query": {"type": "string", "description": "搜索查询词。"},
                 "max_results": {
                     "type": "integer",
                     "minimum": 1,

@@ -20,10 +20,8 @@ _TAG_RE = re.compile(r"<[^>]+>")
 class WikipediaSearchTool(Tool):
     name = "wikipedia_search"
     description = (
-        "Search Wikipedia (free text) for encyclopedic reference on compounds, reactions, "
-        "or concepts, returning page titles, snippets, and optional per-hit summaries. "
-        "Backed by the live Wikipedia API (may be slow); a generally reliable reference, "
-        "though content can be outdated."
+        "在 Wikipedia 上做自由文本搜索，查询化合物、反应或概念的百科式参考资料，"
+        "返回页面标题、摘要片段，以及可选的每条结果的简介。"
     )
 
     def __init__(self, config: WikipediaSearchConfig | None = None) -> None:
@@ -34,7 +32,7 @@ class WikipediaSearchTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Free-text search query."},
+                "query": {"type": "string", "description": "自由文本搜索查询词"},
                 "max_results": {
                     "type": "integer",
                     "minimum": 1,
@@ -45,7 +43,7 @@ class WikipediaSearchTool(Tool):
                 "language": {
                     "type": "string",
                     "default": self.config.language,
-                    "description": "Wikipedia language code.",
+                    "description": "Wikipedia 语言代码",
                 },
             },
             "required": ["query"],

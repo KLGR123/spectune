@@ -355,7 +355,7 @@ function renderReward(t) {
     ? `<span class="badge badge-hit">Top-1 Hit</span>`
     : `<span class="badge badge-miss">Rank ${d.gt_rank != null ? d.gt_rank + 1 : '?'}</span>`;
 
-  const components = d.weighted_components || {};
+  const components = d.components || {};
   const compHtml = Object.entries(components).map(([k, v]) =>
     `<div class="reward-item"><span class="rk">${esc(k)}</span>: <span class="rv">${typeof v === 'number' ? v.toFixed(3) : esc(String(v))}</span></div>`
   ).join('');

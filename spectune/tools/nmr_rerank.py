@@ -14,9 +14,8 @@ from .utils import canonical_smiles, has_rdkit, molecular_formula, post_json, sp
 class NmrRerankTool(Tool):
     name = "nmr_rerank"
     description = (
-        "Score and rerank candidate SMILES against NMR spectral evidence, optionally filtered "
-        "by a target molecular formula, via an external scoring model. Runs remotely (may be "
-        "slow); scores are a reliable ranking signal worth cross-checking."
+        "通过外部打分模型，基于 NMR 谱学证据对候选 SMILES 打分并重新排序，"
+        "可选以目标分子式作为硬过滤条件。"
     )
 
     def __init__(self, config: NmrRerankConfig | None = None) -> None:
@@ -27,11 +26,11 @@ class NmrRerankTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "smiles_list": {"type": "array", "items": {"type": "string"}, "description": "Candidates to score."},
+                "smiles_list": {"type": "array", "items": {"type": "string"}, "description": "待打分的候选分子"},
                 "topk": {"type": "integer", "minimum": 1, "default": self.config.default_topk},
-                "max_to_score": {"type": "integer", "minimum": 1, "description": "Alias for topk."},
-                "formula": {"type": "string", "description": "Optional hard formula filter applied before scoring."},
-                "molecular_formula": {"type": "string", "description": "Alias for formula."},
+                # "max_to_score": {"type": "integer", "minimum": 1, "description": "topk 的别名"},
+                "formula": {"type": "string", "description": "可选的硬性分子式过滤条件"},
+                # "molecular_formula": {"type": "string", "description": "formula 的别名"},
                 "h_nmr_peaks": {"type": "array", "items": {"type": "object"}},
                 "c_nmr_peaks": {"type": "array", "items": {"type": "object"}},
                 "h_shifts": {"type": "array", "items": {"type": "number"}},

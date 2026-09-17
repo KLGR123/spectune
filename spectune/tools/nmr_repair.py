@@ -14,19 +14,17 @@ from .utils import canonical_smiles, molecular_formula, post_json
 class NmrRepairTool(Tool):
     name = "nmr_repair"
     description = (
-        "Refine a seed candidate SMILES so it matches a target molecular formula, via an "
-        "external reinforcement learning based model. Runs remotely; the repaired structure is a "
-        "suggestion worth verifying."
+        "通过外部模型对种子候选 SMILES 做修正，使其匹配目标分子式。"
     )
     parameters: JsonDict = {
         "type": "object",
         "properties": {
-            "input_smiles": {"type": "string", "description": "Seed molecule SMILES to repair."},
-            "smiles": {"type": "string", "description": "Alias for input_smiles."},
-            "candidate_smiles": {"type": "string", "description": "Alias for input_smiles."},
-            "target_formula": {"type": "string", "description": "Molecular formula the output must match."},
-            "formula": {"type": "string", "description": "Alias for target_formula."},
-            "molecular_formula": {"type": "string", "description": "Alias for target_formula."},
+            "input_smiles": {"type": "string", "description": "待修正的种子分子 SMILES"},
+            # "smiles": {"type": "string", "description": "input_smiles 别名"},
+            # "candidate_smiles": {"type": "string", "description": "input_smiles 别名"},
+            "target_formula": {"type": "string", "description": "必须匹配的目标分子式"},
+            # "formula": {"type": "string", "description": "target_formula 别名"},
+            # "molecular_formula": {"type": "string", "description": "target_formula 别名"},
         },
         "required": [],
         "additionalProperties": False,

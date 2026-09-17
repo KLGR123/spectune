@@ -8,9 +8,10 @@ from typing import Any
 
 from .askcos_reaction_forward_predict import AskcosReactionForwardPredictTool
 from .base import JsonDict, Tool, ToolResult
-from .code_interpreter import CodeInterpreterTool
+from .code_interpreter import CodeInterpreterGuideTool, CodeInterpreterTool
 from .config import ToolManagerConfig
 from .crossref_search import CrossrefSearchTool
+from .fragment_match import FragmentMatchTool
 from .nmr_forward_predict import NmrForwardPredictTool
 from .nmr_generate import NmrGenerateTool
 from .nmr_repair import NmrRepairTool
@@ -19,7 +20,7 @@ from .nmrexp_search import NmrExpSearchTool
 from .reaction_local_index_search import ReactionLocalIndexSearchTool
 from .semantic_scholar_search import SemanticScholarSearchTool
 from .unimol3_reaction_forward_predict import Unimol3ReactionForwardPredictTool
-from .web_search import WebSearchTool
+from .web_search import WebSearchGuideTool, WebSearchTool
 from .wikipedia_search import WikipediaSearchTool
 
 
@@ -41,13 +42,16 @@ class ToolManager:
         return cls(
             [
                 WebSearchTool(config.web_search),
+                WebSearchGuideTool(),
                 CodeInterpreterTool(config.code_interpreter),
+                CodeInterpreterGuideTool(),
                 NmrGenerateTool(config.nmr_generate),
                 NmrRepairTool(config.nmr_repair),
                 NmrRerankTool(config.nmr_rerank),
                 NmrForwardPredictTool(config.nmr_forward_predict),
                 NmrExpSearchTool(config.nmrexp_search),
                 ReactionLocalIndexSearchTool(config.reaction_local_index_search),
+                FragmentMatchTool(config.fragment_match),
                 AskcosReactionForwardPredictTool(config.askcos_reaction_forward_predict),
                 Unimol3ReactionForwardPredictTool(config.unimol3_reaction_forward_predict),
                 SemanticScholarSearchTool(config.semantic_scholar_search),

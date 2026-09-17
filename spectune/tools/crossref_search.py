@@ -17,9 +17,8 @@ from .config import CrossrefSearchConfig
 class CrossrefSearchTool(Tool):
     name = "crossref_search"
     description = (
-        "Look up scholarly work metadata (title, DOI, venue, year) via the external "
-        "Crossref API; no full text. The remote call may be slow; a reliable metadata "
-        "reference, though coverage can be incomplete."
+        "通过 Crossref 外部 API 查询学术文献的元数据（标题、DOI、期刊/会议、年份）；"
+        "不含全文。远程调用可能较慢；元数据可信度较高，但覆盖范围可能不完整。"
     )
 
     def __init__(self, config: CrossrefSearchConfig | None = None) -> None:
@@ -30,7 +29,7 @@ class CrossrefSearchTool(Tool):
         return {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Search query."},
+                "query": {"type": "string", "description": "搜索查询词。"},
                 "max_results": {
                     "type": "integer",
                     "minimum": 1,

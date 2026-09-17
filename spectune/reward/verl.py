@@ -75,10 +75,11 @@ def compute_score(
 ) -> dict[str, float]:
     """Compute reward and per-component scores using the signature expected by verl.
 
-    Returns a dict with ``score`` (total reward, including the unweighted
-    ``nmr_diversity_bonus``) plus individual component keys (``gt_smiles``,
-    ``tool_call_format``, ``smiles_validity``, ``tool_call_count``,
-    ``nmr_diversity_bonus``) so verl logs them as separate TensorBoard curves.
+    Returns a dict with ``score`` (the sum of every component and bonus/penalty
+    below) plus individual keys (``gt_smiles``, ``tool_call_format``,
+    ``smiles_validity``, ``tool_call_count``, ``nmr_diversity_bonus``,
+    ``gt_loose_match_bonus``, ``code_interpreter_missing_print_penalty``,
+    ``code_interpreter_error_penalty``) so verl logs them as separate TensorBoard curves.
 
     Reward settings can be passed as keyword arguments or under
     ``extra_info["reward_config"]``. If ``extra_info["rollout_messages"]`` is
@@ -112,15 +113,19 @@ def compute_score(
     tool_schemas = _resolve_tool_schemas(extra_info)
     evaluator = RewardEvaluator(RewardConfig(**config_values), tool_schemas=tool_schemas)
     result = evaluator.evaluate(_resolve_rollout(solution_str, extra_info), ground_truth)
-    # ``nmr_diversity_bonus`` is added to ``score`` outside the weighted
-    # component sum (see RewardConfig), so it isn't in ``result.components``.
-    # Surface it explicitly so verl's NaiveRewardManager/DAPORewardManager
-    # pick it up into ``reward_extra_info`` and it gets its own
-    # ``reward_components/nmr_diversity_bonus/mean`` TensorBoard curve.
+    # ``nmr_diversity_bonus``, ``gt_loose_match_bonus`` and the
+    # ``code_interpreter_*`` penalties aren't in ``result.components`` (they're
+    # situational bonuses/penalties, not core components). Surface them
+    # explicitly so verl's NaiveRewardManager/DAPORewardManager pick them up
+    # into ``reward_extra_info`` and each gets its own
+    # ``reward_components/<name>/mean`` TensorBoard curve.
     return {
         "score": result.score,
         **result.components,
         "nmr_diversity_bonus": result.details["nmr_diversity_bonus"],
+        "gt_loose_match_bonus": result.details["gt_loose_match_bonus"],
+        "code_interpreter_missing_print_penalty": result.details["code_interpreter_missing_print_penalty"],
+        "code_interpreter_error_penalty": result.details["code_interpreter_error_penalty"],
     }
 
 

@@ -220,6 +220,33 @@ class TestHitAtKMetrics:
         with pytest.raises(ValueError, match="total_samples"):
             compute_hit_at_k_metrics([self._record(1, ["CCO"])], total_samples=0)
 
+    @staticmethod
+    def _empty_gt_record(*, correct: bool):
+        return RolloutRecord(
+            sample_id="empty",
+            gt_smiles="",
+            messages=[],
+            reward_score=0.7 if correct else 0.0,
+            reward_details={
+                "gt_rank": None,
+                "canonical_candidates": [],
+                "ground_truth_smiles": None,
+                "components": {"gt_smiles": 0.7 if correct else 0.0},
+            },
+            n_rounds=1,
+        )
+
+    def test_correctly_predicted_empty_ground_truth_counts_as_a_hit(self):
+        records = [
+            self._empty_gt_record(correct=True),
+            self._empty_gt_record(correct=False),
+        ]
+
+        metrics = compute_hit_at_k_metrics(records, total_samples=2)
+
+        assert metrics["hit@1"] == pytest.approx(0.5)
+        assert metrics["hit@all"] == pytest.approx(0.5)
+
 
 class TestRolloutConfigValidation:
     @pytest.mark.parametrize(

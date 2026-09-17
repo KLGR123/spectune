@@ -6,7 +6,7 @@ set -xeuo pipefail
 
 NDEVICES_PER_NODE=8
 PROJECT_NAME=sft
-EXPERIMENT_NAME=sft-all-rollout-qwen3-32b
+EXPERIMENT_NAME=sft-qwen3-32b-v0.x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SPECTUNE_ROOT="${SPECTUNE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"

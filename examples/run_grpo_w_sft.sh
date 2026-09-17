@@ -5,7 +5,7 @@ set -xeuo pipefail
 NNODES=1
 NDEVICES_PER_NODE=8
 PROJECT_NAME=rl
-EXPERIMENT_NAME=grpo-all-43k-qwen3-8b-w-sft
+EXPERIMENT_NAME=dapo-qwen3-8b-w-sft-v0.x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export SPECTUNE_ROOT="${SPECTUNE_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
